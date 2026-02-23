@@ -25,7 +25,7 @@ const STORAGE_KEYS = {
 // Set to "" to disable update checks entirely.
 const UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/leeyaoming111-rgb/memorybridge/main/update.json";
 const UPDATE_CHECK_INTERVAL_HOURS = 6;
-const CURRENT_VERSION = "0.5.0";
+const CURRENT_VERSION = "0.7.0";
 
 const DEFAULT_SETTINGS = {
   captureEnabled: true,

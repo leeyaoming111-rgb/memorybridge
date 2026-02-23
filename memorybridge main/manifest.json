@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MemoryBridge",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Capture AI conversations, distill them into a portable memory profile, and inject context into new chats.",
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
