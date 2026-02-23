@@ -23,7 +23,7 @@ const STORAGE_KEYS = {
 // ── Update Config ──────────────────────────────────────────────
 // Point this at your hosted update manifest (GitHub raw URL works great).
 // Set to "" to disable update checks entirely.
-const UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/leeyaoming111-rgb/memorybridge/refs/heads/main/update(1).json"; // e.g. "https://raw.githubusercontent.com/youruser/memorybridge/main/update.json"
+const UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/leeyaoming111-rgb/memorybridge/refs/heads/main/update.json"; // e.g. "https://raw.githubusercontent.com/youruser/memorybridge/main/update.json"
 const UPDATE_CHECK_INTERVAL_HOURS = 6;
 const CURRENT_VERSION = "0.5.0";
 
