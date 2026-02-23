@@ -1,5 +1,5 @@
 {
   "version": "0.7.0",
-  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/latest/download/memorybridge-extension.zip",
-  "changelog": "Improved ChatGPT injection, background distillation"
+  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/latest/download/memorybridge-0.7.0.zip",
+  "changelog": "ChatGPT injection fix, background distillation, update system"
 }
