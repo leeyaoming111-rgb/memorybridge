@@ -1,0 +1,574 @@
+/**
+ * MemoryBridge — Popup Controller (popup.js)
+ */
+
+document.addEventListener("DOMContentLoaded", () => {
+  initTabs();
+  loadStats();
+  loadMemoryProfile();
+  loadSettings();
+  loadBuffer();
+  loadContextPrompt();
+  loadUpdateInfo();
+  bindActions();
+});
+
+// ─── Messaging Helpers ─────────────────────────────────────────
+function sendBg(type, payload = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type, payload }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+      } else {
+        resolve(response);
+      }
+    });
+  });
+}
+
+function sendTab(type, payload = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (!tabs[0]) return reject(new Error("No active tab"));
+      chrome.tabs.sendMessage(tabs[0].id, { type, payload }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(response);
+        }
+      });
+    });
+  });
+}
+
+// ─── Tabs ──────────────────────────────────────────────────────
+function initTabs() {
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+
+      // Refresh data when switching tabs
+      const tabName = tab.dataset.tab;
+      if (tabName === "memory") { loadStats(); loadMemoryProfile(); }
+      if (tabName === "capture") { loadBuffer(); }
+      if (tabName === "inject") { loadContextPrompt(); }
+    });
+  });
+}
+
+// ─── Stats ─────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const stats = await sendBg("GET_STATS");
+    document.getElementById("statMessages").textContent = stats.totalMessages || 0;
+    document.getElementById("statDistills").textContent = stats.totalDistillations || 0;
+
+    // Count actionable profile items
+    const profile = await sendBg("GET_MEMORY_PROFILE");
+    const ip = profile.interaction_preferences || {};
+    const prefCount = (ip.learning_style?.length || 0) + (ip.response_format?.length || 0) +
+      (ip.tone?.length || 0) + (ip.pet_peeves?.length || 0) + (ip.likes?.length || 0);
+    const factCount = prefCount +
+      (profile.expertise?.length || 0) +
+      (profile.tools_and_stack?.length || 0) +
+      (profile.facts?.length || 0);
+    document.getElementById("statFacts").textContent = factCount;
+
+    // Update status dot
+    const dot = document.getElementById("statusDot");
+    try {
+      const status = await sendTab("GET_CAPTURE_STATUS");
+      dot.classList.toggle("inactive", !status.enabled);
+      dot.title = status.enabled ? `Capturing on ${status.provider}` : "Capture paused";
+    } catch {
+      dot.classList.add("inactive");
+      dot.title = "Not on a chatbot page";
+    }
+  } catch (err) {
+    console.error("Failed to load stats:", err);
+  }
+}
+
+// ─── Memory Profile ────────────────────────────────────────────
+async function loadMemoryProfile() {
+  try {
+    const profile = await sendBg("GET_MEMORY_PROFILE");
+    renderProfile(profile);
+  } catch (err) {
+    console.error("Failed to load profile:", err);
+  }
+}
+
+function renderProfile(profile) {
+  const container = document.getElementById("profileContent");
+  
+  const hasData = profile.lastUpdated ||
+    (profile.interaction_preferences && Object.values(profile.interaction_preferences).some(v => v && (Array.isArray(v) ? v.length > 0 : true))) ||
+    (profile.facts || []).length > 0 ||
+    (profile.expertise || []).length > 0 ||
+    Object.keys(profile.identity || {}).length > 0;
+
+  if (!hasData) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">🧠</div>
+        <div class="empty-state-title">No memory yet</div>
+        <div class="empty-state-text">
+          Start chatting with any AI assistant.<br>
+          MemoryBridge will capture and learn.
+        </div>
+      </div>`;
+    return;
+  }
+
+  let html = "";
+
+  // ── Interaction Preferences (lead with these) ──
+  const ip = profile.interaction_preferences || {};
+  const prefSections = [
+    { key: "learning_style", icon: "🎓", label: "How I Learn" },
+    { key: "response_format", icon: "📐", label: "Response Format" },
+    { key: "tone", icon: "🎨", label: "Preferred Tone" },
+    { key: "likes", icon: "👍", label: "Things I Like" },
+    { key: "pet_peeves", icon: "🚫", label: "Pet Peeves" }
+  ];
+
+  const hasPrefs = prefSections.some(s => ip[s.key]?.length) || ip.depth || ip.verbosity;
+  if (hasPrefs) {
+    html += `<div class="profile-card"><h3>⚡ Interaction Preferences</h3>`;
+
+    if (ip.verbosity || ip.depth) {
+      html += `<div style="display: flex; gap: 8px; margin-bottom: 8px;">`;
+      if (ip.verbosity) html += `<span class="tag accent">${escapeHtml(ip.verbosity)} verbosity</span>`;
+      if (ip.depth) html += `<span class="tag accent">${escapeHtml(ip.depth)} depth</span>`;
+      html += `</div>`;
+    }
+
+    for (const section of prefSections) {
+      const items = ip[section.key];
+      if (items?.length) {
+        html += `<div style="margin-bottom: 8px;">`;
+        html += `<div style="font-size: 11px; font-weight: 500; color: var(--text-muted); margin-bottom: 4px;">${section.icon} ${section.label}</div>`;
+        items.forEach(item => {
+          html += `<div style="font-size: 12px; color: var(--text-secondary); padding: 2px 0; padding-left: 8px; border-left: 2px solid ${section.key === 'pet_peeves' ? 'var(--danger)' : 'var(--accent)'};">`;
+          html += escapeHtml(item);
+          html += `</div>`;
+        });
+        html += `</div>`;
+      }
+    }
+    html += `</div>`;
+  }
+
+  // ── Communication Patterns ──
+  const cp = profile.communication_patterns || {};
+  if (cp.tone || cp.vocabulary_level || cp.asks_questions_like?.length) {
+    html += `<div class="profile-card"><h3>💬 Communication Style</h3>`;
+    if (cp.tone) html += `<p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">${escapeHtml(cp.tone)}</p>`;
+    if (cp.vocabulary_level) html += profileField("Vocabulary", cp.vocabulary_level);
+    if (cp.asks_questions_like?.length) {
+      html += `<div class="tag-list" style="margin-top: 6px;">`;
+      cp.asks_questions_like.forEach(p => { html += `<span class="tag">${escapeHtml(p)}</span>`; });
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // ── Expertise ──
+  if (profile.expertise?.length) {
+    html += `<div class="profile-card"><h3>🎯 Expertise</h3><div class="tag-list">`;
+    profile.expertise.forEach(e => {
+      const isHigh = e.level === "expert" || e.level === "advanced";
+      html += `<span class="tag ${isHigh ? 'accent' : ''}">${escapeHtml(e.domain)} · ${e.level}</span>`;
+    });
+    html += `</div></div>`;
+  }
+
+  // ── Tools & Stack ──
+  if (profile.tools_and_stack?.length) {
+    html += `<div class="profile-card"><h3>🔧 Tools & Stack</h3><div class="tag-list">`;
+    profile.tools_and_stack.forEach(t => { html += `<span class="tag">${escapeHtml(t)}</span>`; });
+    html += `</div></div>`;
+  }
+
+  // ── Active Projects ──
+  if (profile.active_projects?.length) {
+    html += `<div class="profile-card"><h3>📂 Active Projects</h3>`;
+    profile.active_projects.forEach(p => {
+      html += `<div style="padding: 4px 0; border-bottom: 1px solid var(--border);">`;
+      html += `<div style="font-size: 12px; font-weight: 500; color: var(--text-primary);">${escapeHtml(p.name)}</div>`;
+      if (p.context) html += `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(p.context)}</div>`;
+      html += `</div>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── Identity ──
+  const id = profile.identity || {};
+  if (Object.keys(id).length > 0) {
+    html += `<div class="profile-card"><h3>👤 Identity</h3>`;
+    if (id.name) html += profileField("Name", id.name);
+    if (id.occupation) html += profileField("Occupation", id.occupation);
+    if (id.location) html += profileField("Location", id.location);
+    html += `</div>`;
+  }
+
+  // ── Facts ──
+  if (profile.facts?.length) {
+    html += `<div class="profile-card"><h3>📌 Known Facts</h3>`;
+    profile.facts.slice(0, 10).forEach(f => {
+      const confPct = Math.round((f.confidence || 0.5) * 100);
+      html += `
+        <div class="fact-item">
+          <span class="fact-badge">${escapeHtml(f.category || "other")}</span>
+          <span style="flex: 1; color: var(--text-secondary);">${escapeHtml(f.fact)}</span>
+          <div class="confidence-bar" title="${confPct}% confidence">
+            <div class="confidence-fill" style="width: ${confPct}%"></div>
+          </div>
+        </div>`;
+    });
+    if (profile.facts.length > 10) {
+      html += `<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">+${profile.facts.length - 10} more facts</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // ── Last updated ──
+  if (profile.lastUpdated) {
+    html += `<div style="font-size: 10px; color: var(--text-muted); text-align: right; margin-top: 4px;">
+      Last distilled: ${new Date(profile.lastUpdated).toLocaleString()}
+    </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function profileField(label, value) {
+  return `<div class="profile-field">
+    <span class="profile-field-label">${escapeHtml(label)}</span>
+    <span class="profile-field-value">${escapeHtml(value)}</span>
+  </div>`;
+}
+
+// ─── Buffer ────────────────────────────────────────────────────
+async function loadBuffer() {
+  try {
+    const buffer = await sendBg("GET_RAW_BUFFER");
+    const countEl = document.getElementById("bufferCount");
+    countEl.textContent = `${buffer.length} messages buffered`;
+
+    const listEl = document.getElementById("bufferList");
+
+    if (buffer.length === 0) {
+      listEl.innerHTML = `<div class="empty-state">
+        <div class="empty-state-text">No messages captured yet.<br>Visit ChatGPT, Claude, or Gemini to start.</div>
+      </div>`;
+      return;
+    }
+
+    // Show most recent first, limit to 50
+    const recent = buffer.slice(-50).reverse();
+    listEl.innerHTML = recent.map(entry => `
+      <div class="buffer-item">
+        <div class="buffer-meta">
+          <span class="buffer-provider ${entry.provider}">${entry.providerName || entry.provider}</span>
+          <span class="buffer-role">${entry.role}</span>
+          <span style="margin-left: auto; font-size: 10px; color: var(--text-muted);">
+            ${new Date(entry.timestamp).toLocaleTimeString()}
+          </span>
+        </div>
+        <div class="buffer-text">${escapeHtml(entry.text.slice(0, 200))}</div>
+      </div>
+    `).join("");
+  } catch (err) {
+    console.error("Failed to load buffer:", err);
+  }
+}
+
+// ─── Context Prompt ────────────────────────────────────────────
+async function loadContextPrompt() {
+  try {
+    const { prompt, tokenEstimate } = await sendBg("GET_CONTEXT_PROMPT");
+    document.getElementById("contextPreview").textContent = prompt;
+
+    const tokenEl = document.getElementById("tokenCount");
+    tokenEl.textContent = `~${tokenEstimate} tokens`;
+    tokenEl.className = "token-count" +
+      (tokenEstimate > 2000 ? " danger" : tokenEstimate > 1000 ? " warn" : "");
+  } catch (err) {
+    document.getElementById("contextPreview").textContent = "Failed to generate context prompt.";
+  }
+}
+
+// ─── Settings ──────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const settings = await sendBg("GET_SETTINGS");
+    document.getElementById("settingProvider").value = settings.apiProvider || "session_claude";
+    document.getElementById("settingApiKey").value = settings.apiKey || "";
+    document.getElementById("settingModel").value = settings.model || "claude-sonnet-4-20250514";
+    document.getElementById("settingCapture").checked = settings.captureEnabled !== false;
+    document.getElementById("settingAutoDistill").checked = settings.autoDistill !== false;
+    document.getElementById("settingThreshold").value = settings.distillThreshold || 20;
+    updateProviderUI(settings.apiProvider || "session_claude");
+  } catch (err) {
+    console.error("Failed to load settings:", err);
+  }
+}
+
+function updateProviderUI(provider) {
+  const isSession = provider.startsWith("session_");
+  document.getElementById("sessionInfo").style.display = isSession ? "block" : "none";
+  document.getElementById("apiKeyGroup").style.display = isSession ? "none" : "block";
+  document.getElementById("modelGroup").style.display = isSession ? "none" : "block";
+}
+
+// ─── Actions ──────────────────────────────────────────────────
+function bindActions() {
+  // Distill
+  document.getElementById("btnDistill").addEventListener("click", async () => {
+    const btn = document.getElementById("btnDistill");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Distilling...';
+    try {
+      // Check if session mode needs permissions
+      const settings = await sendBg("GET_SETTINGS");
+      if (settings.apiProvider?.startsWith("session_")) {
+        const granted = await ensureSessionPermissions(settings.apiProvider);
+        if (!granted) {
+          showToast("⚠ Permission required — please approve when prompted");
+          btn.disabled = false;
+          btn.innerHTML = "⚡ Distill Now";
+          return;
+        }
+      }
+
+      const result = await sendBg("TRIGGER_DISTILL");
+      if (result.success) {
+        showToast("✓ Memory distilled successfully");
+        loadMemoryProfile();
+        loadStats();
+        loadContextPrompt();
+      } else {
+        showToast("⚠ " + (result.error || "Distillation failed"));
+      }
+    } catch (err) {
+      showToast("⚠ Error: " + err.message);
+    }
+    btn.disabled = false;
+    btn.innerHTML = "⚡ Distill Now";
+  });
+
+  // Export
+  document.getElementById("btnExport").addEventListener("click", async () => {
+    try {
+      const data = await sendBg("EXPORT_PROFILE");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `memorybridge-profile-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("✓ Profile exported");
+    } catch (err) {
+      showToast("⚠ Export failed");
+    }
+  });
+
+  // Import
+  document.getElementById("btnImport").addEventListener("click", () => {
+    document.getElementById("fileImport").click();
+  });
+
+  document.getElementById("fileImport").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const result = await sendBg("IMPORT_PROFILE", data);
+      if (result.success) {
+        showToast("✓ Profile imported");
+        loadMemoryProfile();
+        loadStats();
+        loadContextPrompt();
+      } else {
+        showToast("⚠ " + (result.error || "Import failed"));
+      }
+    } catch (err) {
+      showToast("⚠ Invalid file format");
+    }
+    e.target.value = "";
+  });
+
+  // Copy context
+  document.getElementById("btnCopyContext").addEventListener("click", async () => {
+    const text = document.getElementById("contextPreview").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("✓ Copied to clipboard");
+    } catch {
+      // Fallback
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      showToast("✓ Copied to clipboard");
+    }
+  });
+
+  // Inject context
+  document.getElementById("btnInjectContext").addEventListener("click", async () => {
+    try {
+      const { prompt } = await sendBg("GET_CONTEXT_PROMPT");
+      await sendTab("INJECT_MEMORY", { memoryText: prompt });
+      showToast("✓ Injected into page");
+    } catch (err) {
+      showToast("⚠ Not on a chatbot page");
+    }
+  });
+
+  // Save settings
+  document.getElementById("btnSaveSettings").addEventListener("click", async () => {
+    const settings = {
+      apiProvider: document.getElementById("settingProvider").value,
+      apiKey: document.getElementById("settingApiKey").value,
+      model: document.getElementById("settingModel").value,
+      captureEnabled: document.getElementById("settingCapture").checked,
+      autoDistill: document.getElementById("settingAutoDistill").checked,
+      distillThreshold: parseInt(document.getElementById("settingThreshold").value) || 20
+    };
+    try {
+      await sendBg("SAVE_SETTINGS", settings);
+      showToast("✓ Settings saved");
+    } catch (err) {
+      showToast("⚠ Failed to save");
+    }
+  });
+
+  // Provider dropdown — toggle API key fields and request permissions
+  document.getElementById("settingProvider").addEventListener("change", async (e) => {
+    updateProviderUI(e.target.value);
+    if (e.target.value.startsWith("session_")) {
+      const granted = await ensureSessionPermissions(e.target.value);
+      if (!granted) {
+        showToast("⚠ Permission needed for session mode");
+      }
+    }
+  });
+
+  // Clear buffer
+  document.getElementById("btnClearBuffer").addEventListener("click", async () => {
+    if (confirm("Clear all buffered messages? This data hasn't been distilled yet.")) {
+      await sendBg("CLEAR_RAW_BUFFER");
+      loadBuffer();
+      showToast("✓ Buffer cleared");
+    }
+  });
+
+  // Clear all
+  document.getElementById("btnClearAll").addEventListener("click", async () => {
+    if (confirm("This will permanently delete your entire memory profile and all captured data. Are you sure?")) {
+      await sendBg("CLEAR_ALL_DATA");
+      loadMemoryProfile();
+      loadStats();
+      loadBuffer();
+      loadContextPrompt();
+      showToast("✓ All data cleared");
+    }
+  });
+
+  // Dismiss update banner
+  document.getElementById("btnDismissUpdate").addEventListener("click", async (e) => {
+    e.stopPropagation();
+    await sendBg("DISMISS_UPDATE");
+    document.getElementById("updateBanner").classList.remove("visible");
+  });
+
+  // Manual update check
+  document.getElementById("btnCheckUpdate").addEventListener("click", async () => {
+    const statusEl = document.getElementById("updateStatus");
+    statusEl.textContent = "Checking...";
+    try {
+      const result = await sendBg("CHECK_FOR_UPDATE");
+      if (!result || result.error) {
+        statusEl.textContent = "⚠ " + (result?.error || "Check failed — is update.json uploaded to GitHub?");
+      } else if (result.updateAvailable) {
+        statusEl.textContent = `✓ Update available: v${result.latestVersion}`;
+        statusEl.style.color = "var(--warning)";
+        loadUpdateInfo();
+      } else {
+        statusEl.textContent = `✓ You're on the latest version (v${result.currentVersion})`;
+        statusEl.style.color = "var(--success)";
+      }
+    } catch (err) {
+      statusEl.textContent = "⚠ Error: " + err.message;
+    }
+  });
+}
+
+// ─── Toast ────────────────────────────────────────────────────
+function showToast(message) {
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => toast.classList.remove("show"), 2500);
+}
+
+// ─── Update Checker ───────────────────────────────────────────
+async function loadUpdateInfo() {
+  try {
+    const info = await sendBg("GET_UPDATE_INFO");
+
+    // Always show current version
+    const vLabel = document.getElementById("versionLabel");
+    if (vLabel && info.currentVersion) {
+      vLabel.textContent = `v${info.currentVersion}`;
+    }
+
+    // Show banner if update available and not dismissed
+    const banner = document.getElementById("updateBanner");
+    if (info.updateAvailable && !info.dismissed) {
+      document.getElementById("updateVersion").textContent = `v${info.latestVersion}`;
+      document.getElementById("updateChangelog").textContent = info.changelog || "";
+      if (info.downloadUrl) {
+        document.getElementById("updateDownloadLink").href = info.downloadUrl;
+      }
+      banner.classList.add("visible");
+    }
+  } catch (_) {}
+}
+
+// ─── Utility ──────────────────────────────────────────────────
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+async function ensureSessionPermissions(provider) {
+  const origins = {
+    session_claude: ["https://claude.ai/*"],
+    session_chatgpt: ["https://chatgpt.com/*", "https://chat.openai.com/*"]
+  };
+  const needed = origins[provider] || [];
+  if (!needed.length) return true;
+
+  const already = await chrome.permissions.contains({
+    permissions: ["cookies"],
+    origins: needed
+  });
+  if (already) return true;
+
+  return await chrome.permissions.request({
+    permissions: ["cookies"],
+    origins: needed
+  });
+}
