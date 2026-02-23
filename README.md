@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemoryBridge</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg-primary: #0F0F14;
+      --bg-secondary: #1A1A24;
+      --bg-tertiary: #24243A;
+      --bg-card: #1E1E30;
+      --text-primary: #E8E6F0;
+      --text-secondary: #9490B0;
+      --text-muted: #5E5A7A;
+      --accent: #7B6CF6;
+      --accent-dim: #5A4ED4;
+      --accent-glow: rgba(123, 108, 246, 0.2);
+      --success: #4ADE80;
+      --warning: #FBBF24;
+      --danger: #F87171;
+      --border: rgba(148, 144, 176, 0.12);
+      --border-accent: rgba(123, 108, 246, 0.3);
+      --radius: 10px;
+      --radius-sm: 6px;
+      --font: 'DM Sans', -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 400px;
+      min-height: 500px;
+      max-height: 600px;
+      overflow-y: auto;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* ── Scrollbar ── */
+    body::-webkit-scrollbar { width: 6px; }
+    body::-webkit-scrollbar-track { background: transparent; }
+    body::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 3px; }
+
+    /* ── Header ── */
+    .header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(123, 108, 246, 0.06) 0%, transparent 100%);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent) 0%, #A78BFA 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      box-shadow: 0 2px 8px var(--accent-glow);
+    }
+
+    .logo-text {
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.inactive {
+      background: var(--text-muted);
+      box-shadow: none;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-sm);
+      padding: 2px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 6px 0;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: var(--font);
+    }
+
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active {
+      color: var(--text-primary);
+      background: var(--bg-tertiary);
+    }
+
+    /* ── Tab Content ── */
+    .tab-content { display: none; padding: 16px 20px 20px; }
+    .tab-content.active { display: block; }
+
+    /* ── Stat Cards ── */
+    .stat-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: var(--mono);
+      letter-spacing: -1px;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Profile Display ── */
+    .profile-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 10px;
+    }
+
+    .profile-card h3 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+
+    .profile-field {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .profile-field:last-child { border-bottom: none; }
+
+    .profile-field-label {
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .profile-field-value {
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 500;
+      text-align: right;
+      max-width: 60%;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .tag {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .tag.accent {
+      background: var(--accent-glow);
+      border-color: var(--border-accent);
+      color: var(--accent);
+    }
+
+    .fact-item {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .fact-item:last-child { border-bottom: none; }
+
+    .fact-badge {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+
+    .confidence-bar {
+      width: 30px;
+      height: 3px;
+      background: var(--bg-tertiary);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .confidence-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--border-accent);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-dim);
+    }
+
+    .btn-danger {
+      color: var(--danger);
+      border-color: rgba(248, 113, 113, 0.2);
+    }
+
+    .btn-danger:hover {
+      background: rgba(248, 113, 113, 0.1);
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .btn-full {
+      width: 100%;
+    }
+
+    /* ── Context Prompt Preview ── */
+    .context-preview {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      font-family: var(--mono);
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 10px;
+    }
+
+    /* ── Settings Form ── */
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 5px;
+    }
+
+    .form-sublabel {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: var(--mono);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+    }
+
+    .form-select {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: var(--font);
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .form-select option {
+      background: var(--bg-primary);
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+    }
+
+    .toggle-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      appearance: none;
+      background: var(--bg-tertiary);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+      border: none;
+    }
+
+    .toggle::before {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      transition: all 0.2s;
+    }
+
+    .toggle:checked {
+      background: var(--accent);
+    }
+
+    .toggle:checked::before {
+      transform: translateX(16px);
+      background: white;
+    }
+
+    /* ── Buffer / Activity ── */
+    .buffer-item {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .buffer-item:last-child { border-bottom: none; }
+
+    .buffer-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 2px;
+    }
+
+    .buffer-provider {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+
+    .buffer-provider.chatgpt { background: rgba(16, 163, 127, 0.15); color: #10A37F; }
+    .buffer-provider.claude { background: rgba(213, 148, 80, 0.15); color: #D59450; }
+    .buffer-provider.gemini { background: rgba(66, 133, 244, 0.15); color: #4285F4; }
+
+    .buffer-role {
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .buffer-text {
+      color: var(--text-secondary);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    /* ── Empty State ── */
+    .empty-state {
+      text-align: center;
+      padding: 30px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+
+    .empty-state-title {
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+    }
+
+    .empty-state-text {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%) translateY(60px);
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-accent);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--text-primary);
+      z-index: 100;
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: none;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Loading ── */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Token Count ── */
+    .token-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-secondary);
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+
+    .token-count.warn { color: var(--warning); }
+    .token-count.danger { color: var(--danger); }
+    .update-banner {
+      display: none;
+      padding: 10px 20px;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%);
+      border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+      font-size: 12px;
+      color: var(--text-primary);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .update-banner:hover { background: rgba(251, 191, 36, 0.15); }
+    .update-banner.visible { display: flex; align-items: center; gap: 8px; }
+    .update-banner-text { flex: 1; }
+    .update-banner-version {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--warning);
+      font-weight: 600;
+    }
+    .update-banner-dismiss {
+      background: none; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 14px; padding: 0 4px;
+    }
+    .update-banner-dismiss:hover { color: var(--text-primary); }
+    .version-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--mono);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <div class="logo">
+        <div class="logo-icon">⧫</div>
+        <span class="logo-text">MemoryBridge</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="version-label" id="versionLabel"></span>
+        <div class="status-dot" id="statusDot" title="Capture active"></div>
+      </div>
+    </div>
+
+    <!-- Update banner (hidden by default, shown when update available) -->
+    <div class="update-banner" id="updateBanner">
+      <span style="font-size: 14px;">⬆️</span>
+      <div class="update-banner-text">
+        Update available: <span class="update-banner-version" id="updateVersion"></span>
+        <div style="font-size: 10px; color: var(--text-muted); margin-top: 1px;" id="updateChangelog"></div>
+      </div>
+      <a id="updateDownloadLink" href="#" target="_blank" style="text-decoration: none;">
+        <button class="btn btn-sm btn-primary">Download</button>
+      </a>
+      <button class="update-banner-dismiss" id="btnDismissUpdate" title="Dismiss">✕</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="memory">Memory</button>
+      <button class="tab" data-tab="capture">Capture</button>
+      <button class="tab" data-tab="inject">Use It</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </div>
+  </div>
+
+  <!-- Memory Tab -->
+  <div class="tab-content active" id="tab-memory">
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="stat-value" id="statMessages">0</div>
+        <div class="stat-label">Messages</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statDistills">0</div>
+        <div class="stat-label">Distills</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statFacts">0</div>
+        <div class="stat-label">Facts</div>
+      </div>
+    </div>
+
+    <div id="profileContent">
+      <div class="empty-state">
+        <div class="empty-state-icon">🧠</div>
+        <div class="empty-state-title">No memory yet</div>
+        <div class="empty-state-text">
+          Start chatting with any AI assistant.<br>
+          MemoryBridge will capture and learn.
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row" style="margin-top: 12px;">
+      <button class="btn btn-primary btn-full" id="btnDistill">
+        ⚡ Distill Now
+      </button>
+    </div>
+    <div class="btn-row" style="margin-top: 6px;">
+      <button class="btn btn-sm" id="btnExport">Export</button>
+      <button class="btn btn-sm" id="btnImport">Import</button>
+      <input type="file" id="fileImport" accept=".json" style="display: none;">
+    </div>
+  </div>
+
+  <!-- Capture Tab -->
+  <div class="tab-content" id="tab-capture">
+    <div class="section">
+      <div class="section-title">Raw Buffer</div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span class="token-count" id="bufferCount">0 messages buffered</span>
+        <button class="btn btn-sm btn-danger" id="btnClearBuffer">Clear</button>
+      </div>
+      <div id="bufferList" style="max-height: 320px; overflow-y: auto;">
+        <div class="empty-state">
+          <div class="empty-state-text">No messages captured yet.<br>Visit ChatGPT, Claude, or Gemini to start.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inject Tab -->
+  <div class="tab-content" id="tab-inject">
+    <div class="section">
+      <div class="section-title">Your Context Prompt</div>
+      <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+        This is the portable summary of who you are. Copy it and paste at the start of any new AI conversation.
+      </p>
+      <div class="context-preview" id="contextPreview">Loading...</div>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span class="token-count" id="tokenCount">~0 tokens</span>
+        <div class="btn-row">
+          <button class="btn btn-sm" id="btnCopyContext">📋 Copy</button>
+          <button class="btn btn-sm btn-primary" id="btnInjectContext">💉 Inject to Page</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section" style="margin-top: 16px;">
+      <div class="section-title">How to Use</div>
+      <div class="profile-card">
+        <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">
+          <strong>Option 1 — Copy & Paste:</strong> Copy the context prompt above and paste it as your first message in any chatbot.<br><br>
+          <strong>Option 2 — Custom Instructions:</strong> Paste into ChatGPT's "Custom Instructions" or Claude's "User Preferences" for persistent context.<br><br>
+          <strong>Option 3 — Auto-Inject:</strong> Click "Inject to Page" while on a chatbot page to auto-fill the input.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div class="tab-content" id="tab-settings">
+    <div class="form-group">
+      <label class="form-label">Distillation Method</label>
+      <div class="form-sublabel">How MemoryBridge processes your conversations into a memory profile.</div>
+      <select class="form-select" id="settingProvider">
+        <option value="session_claude">🔑 Claude Session (no API key)</option>
+        <option value="session_chatgpt">🔑 ChatGPT Session (no API key)</option>
+        <option value="anthropic">Anthropic API (requires key)</option>
+        <option value="openai">OpenAI API (requires key)</option>
+      </select>
+    </div>
+
+    <div id="sessionInfo" class="form-group" style="display: block;">
+      <div style="background: var(--bg-card); border: 1px solid var(--border-accent); border-radius: var(--radius-sm); padding: 10px; font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+        <strong style="color: var(--accent);">✨ No API key needed!</strong><br>
+        Uses your existing login session. Just make sure you're logged into Claude/ChatGPT in this browser. No need to have the tab open.
+      </div>
+    </div>
+
+    <div class="form-group" id="apiKeyGroup" style="display: none;">
+      <label class="form-label">API Key</label>
+      <div class="form-sublabel">Your key stays local. Used only for distillation calls.</div>
+      <input type="password" class="form-input" id="settingApiKey" placeholder="sk-ant-... or sk-..." />
+    </div>
+
+    <div class="form-group" id="modelGroup" style="display: none;">
+      <label class="form-label">Model</label>
+      <input type="text" class="form-input" id="settingModel" placeholder="claude-sonnet-4-20250514" />
+    </div>
+
+    <div class="form-group">
+      <div class="toggle-row">
+        <span class="toggle-label">Auto-capture conversations</span>
+        <input type="checkbox" class="toggle" id="settingCapture" checked>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Auto-distill when buffer is full</span>
+        <input type="checkbox" class="toggle" id="settingAutoDistill" checked>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Auto-distill threshold</label>
+      <div class="form-sublabel">Number of buffered messages before auto-distillation triggers.</div>
+      <input type="number" class="form-input" id="settingThreshold" value="20" min="5" max="100" />
+    </div>
+
+    <div class="btn-row" style="margin-top: 12px;">
+      <button class="btn btn-primary" id="btnSaveSettings">Save Settings</button>
+    </div>
+
+    <div class="section" style="margin-top: 20px;">
+      <div class="section-title">Danger Zone</div>
+      <button class="btn btn-danger btn-full" id="btnClearAll">Reset All Data</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
