@@ -123,32 +123,31 @@ const PROVIDERS = {
     name: "Perplexity",
     color: "#22B8CD",
     extraction: "generic",
-    injection: "auto",
+    injection: "reactHTML",
     selectors: {
       container: [
-        '[class*="ConversationMessages"]',
-        'main',
-        '[class*="thread"]'
+        '[class*="conversation"]',
+        '[class*="chat"]',
+        'main'
       ],
       userMessage: [
-        '[class*="UserMessage"]',
-        '[class*="query-text"]',
-        '[data-testid*="user"]'
+        'span.min-w-0.font-sans.text-base.text-foreground.font-normal.select-text.break-words',
+        'span.select-text.break-words[class*="text-foreground"]'
       ],
       assistantMessage: [
-        '[class*="AnswerMessage"]',
-        '[class*="prose"]',
-        '[class*="answer-text"]',
-        '[data-testid*="answer"]'
+        'p[class*="my-2"]:has([data-pplx-citation])',
+        'p[class*="my-2"]:has(strong)',
+        'p.my-2'
       ],
       messageText: [
-        '.prose',
-        '[class*="markdown"]',
-        'p'
+        'p',
+        'span'
       ],
       inputField: [
+        '#ask-input[contenteditable="true"]',
+        '#ask-input',
+        '[data-lexical-editor="true"]',
         'textarea[placeholder*="Ask"]',
-        'textarea[placeholder*="ask"]',
         'textarea',
         '[contenteditable="true"]'
       ]
@@ -156,44 +155,39 @@ const PROVIDERS = {
   },
 
   comet: {
-    hostPatterns: ["comet"],     // Comet is its own browser — matches any comet-internal pages
+    hostPatterns: [],            // Runs as sidebar overlay on any page
     name: "Comet",
-    color: "#22B8CD",           // Same brand as Perplexity
+    color: "#22B8CD",
     extraction: "generic",
-    injection: "auto",
-    // NOTE: Comet's sidebar assistant selectors need verification.
-    // Install MemoryBridge in Comet, inspect the sidebar, and update these.
+    injection: "reactHTML",
+    // Detected by DOM presence, not hostname
+    domDetectors: [
+      '#ask-input[data-lexical-editor="true"]',
+      '[aria-placeholder="Ask anything…"]'
+    ],
     selectors: {
       container: [
-        '[class*="sidebar"]',
-        '[class*="assistant"]',
-        '[class*="chat-panel"]',
         '[class*="conversation"]',
+        '[class*="chat"]',
         'main'
       ],
       userMessage: [
-        '[class*="UserMessage"]',
-        '[class*="user-message"]',
-        '[data-role="user"]',
-        '[class*="query"]'
+        'span.min-w-0.font-sans.text-base.text-foreground.font-normal.select-text.break-words',
+        'span.select-text.break-words[class*="text-foreground"]'
       ],
       assistantMessage: [
-        '[class*="AssistantMessage"]',
-        '[class*="assistant-message"]',
-        '[data-role="assistant"]',
-        '[class*="answer"]',
-        '[class*="prose"]'
+        'p[class*="my-2"]:has([data-pplx-citation])',
+        'p[class*="my-2"]:has(strong)',
+        'p.my-2'
       ],
       messageText: [
-        '.prose',
-        '[class*="markdown"]',
-        '[class*="message-content"]',
-        'p'
+        'p',
+        'span'
       ],
       inputField: [
-        'textarea[placeholder*="Ask"]',
-        'textarea',
-        '[contenteditable="true"]'
+        '#ask-input[contenteditable="true"]',
+        '#ask-input',
+        '[data-lexical-editor="true"]'
       ]
     }
   },
@@ -362,13 +356,30 @@ function getAllContentScriptMatches() {
   return [...matches];
 }
 
-/** Look up provider by current hostname */
+/** Look up provider by current hostname, then fall back to DOM detection */
 function detectProvider(hostname) {
+  // First pass: hostname matching (fast, covers most providers)
   for (const [key, provider] of Object.entries(PROVIDERS)) {
-    if (provider.hostPatterns.some(h => hostname.includes(h))) {
-      return { key, ...provider };
+    if (provider.hostPatterns && provider.hostPatterns.length > 0) {
+      if (provider.hostPatterns.some(h => hostname.includes(h))) {
+        return { key, ...provider };
+      }
     }
   }
+
+  // Second pass: DOM-based detection (for sidebar overlays like Comet)
+  for (const [key, provider] of Object.entries(PROVIDERS)) {
+    if (provider.domDetectors && provider.domDetectors.length > 0) {
+      for (const sel of provider.domDetectors) {
+        try {
+          if (document.querySelector(sel)) {
+            return { key, ...provider };
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
   return null;
 }
 

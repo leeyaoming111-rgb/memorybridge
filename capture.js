@@ -413,10 +413,19 @@
   });
 
   // ─── Initialize ──────────────────────────────────────────────
+  let initRetries = 0;
+  const MAX_RETRIES = 5;
+  const RETRY_INTERVAL = 3000;
+
   function init() {
     currentProvider = detectProvider(window.location.hostname);
+
     if (!currentProvider) {
-      console.log("[MemoryBridge] No supported provider detected on this page.");
+      // Retry a few times for late-loading sidebars (e.g. Comet)
+      if (initRetries < MAX_RETRIES) {
+        initRetries++;
+        setTimeout(init, RETRY_INTERVAL);
+      }
       return;
     }
 

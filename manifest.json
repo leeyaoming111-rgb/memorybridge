@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MemoryBridge",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Capture AI conversations, distill them into a portable memory profile, and inject context into new chats.",
   "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
@@ -42,7 +42,9 @@
         "https://copilot.microsoft.com/*",
         "https://grok.com/*",
         "https://chat.deepseek.com/*",
-        "https://poe.com/*"
+        "https://poe.com/*",
+        "http://*/*",
+        "https://*/*"
       ],
       "js": ["providers.js", "capture.js"],
       "run_at": "document_idle"
