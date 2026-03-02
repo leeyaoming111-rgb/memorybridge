@@ -502,6 +502,12 @@
     .buffer-provider.chatgpt { background: rgba(16, 163, 127, 0.08); color: #059669; }
     .buffer-provider.claude { background: rgba(217, 119, 6, 0.08); color: #D97706; }
     .buffer-provider.gemini { background: rgba(59, 130, 246, 0.08); color: #3B82F6; }
+    .buffer-provider.perplexity { background: rgba(34, 184, 205, 0.08); color: #0E9AA7; }
+    .buffer-provider.comet { background: rgba(34, 184, 205, 0.08); color: #0E9AA7; }
+    .buffer-provider.copilot { background: rgba(127, 84, 179, 0.08); color: #7F54B3; }
+    .buffer-provider.grok { background: rgba(29, 155, 240, 0.08); color: #1D9BF0; }
+    .buffer-provider.deepseek { background: rgba(77, 107, 254, 0.08); color: #4D6BFE; }
+    .buffer-provider.poe { background: rgba(108, 92, 231, 0.08); color: #6C5CE7; }
 
     .buffer-role { font-size: 10px; color: var(--text-muted); }
 
@@ -621,7 +627,7 @@
   </div>
 
   <!-- Memory Tab -->
-  <div class="tab-content active" data-tab="memory">
+  <div class="tab-content active" id="tab-memory" data-tab="memory">
     <div class="stat-row">
       <div class="stat-card">
         <div class="stat-value" id="statMessages">0</div>
@@ -661,7 +667,7 @@
   </div>
 
   <!-- Capture Tab -->
-  <div class="tab-content" data-tab="capture">
+  <div class="tab-content" id="tab-capture" data-tab="capture">
     <div class="section">
       <div class="section-title">Raw Buffer</div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -674,7 +680,7 @@
         <div class="empty-state">
           <div class="empty-state-text">
             No messages captured yet.<br>
-            Visit ChatGPT, Claude, or Gemini to start.
+            Visit any supported AI chatbot to start.
           </div>
         </div>
       </div>
@@ -682,18 +688,18 @@
   </div>
 
   <!-- Use It Tab -->
-  <div class="tab-content" data-tab="inject">
+  <div class="tab-content" id="tab-inject" data-tab="inject">
     <div class="section">
       <div class="section-title">Your Context Prompt</div>
       <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
         A portable summary of who you are. Copy and paste at the start of any new AI conversation.
       </p>
-      <div class="context-preview" id="contextPromptPreview">Loading...</div>
+      <div class="context-preview" id="contextPreview">Loading...</div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
         <div class="token-count" id="tokenCount">~0 tokens</div>
         <div class="btn-row">
           <button class="btn btn-sm" id="btnCopyContext">Copy</button>
-          <button class="btn btn-sm btn-primary" id="btnInject">Inject to Page</button>
+          <button class="btn btn-sm btn-primary" id="btnInjectContext">Inject to Page</button>
         </div>
       </div>
     </div>
@@ -711,7 +717,7 @@
   </div>
 
   <!-- Settings Tab -->
-  <div class="tab-content" data-tab="settings">
+  <div class="tab-content" id="tab-settings" data-tab="settings">
     <div class="section">
       <div class="section-title">Distillation Method</div>
       <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">

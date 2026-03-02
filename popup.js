@@ -264,7 +264,7 @@ async function loadBuffer() {
 
     if (buffer.length === 0) {
       listEl.innerHTML = `<div class="empty-state">
-        <div class="empty-state-text">No messages captured yet.<br>Visit ChatGPT, Claude, or Gemini to start.</div>
+        <div class="empty-state-text">No messages captured yet.<br>Visit any supported AI chatbot to start.</div>
       </div>`;
       return;
     }
