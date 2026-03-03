@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
-  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/download/v0.9.0/memorybridge-0.9.0.zip",
-  "changelog": "Provider registry: added Perplexity, Comet, Copilot, Grok, DeepSeek, Poe support"
+  "version": "0.9.1",
+  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/download/v0.9.1/memorybridge-0.9.1.zip",
+  "changelog": "Comet sidebar detection, DOM-based provider detection, retry for late-loading overlays"
 }
