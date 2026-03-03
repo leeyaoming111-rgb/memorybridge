@@ -131,15 +131,15 @@ const PROVIDERS = {
         'main'
       ],
       userMessage: [
-        'span.min-w-0.font-sans.text-base.text-foreground.font-normal.select-text.break-words',
-        'span.select-text.break-words[class*="text-foreground"]'
+        'div.bg-subtle.rounded-2xl',
+        'div[class*="bg-subtle"][class*="rounded"]'
       ],
       assistantMessage: [
-        'p[class*="my-2"]:has([data-pplx-citation])',
-        'p[class*="my-2"]:has(strong)',
-        'p.my-2'
+        'p[class*="my-2"]'
       ],
       messageText: [
+        'span.select-text.break-words',
+        'span.break-words',
         'p',
         'span'
       ],
@@ -172,15 +172,15 @@ const PROVIDERS = {
         'main'
       ],
       userMessage: [
-        'span.min-w-0.font-sans.text-base.text-foreground.font-normal.select-text.break-words',
-        'span.select-text.break-words[class*="text-foreground"]'
+        'div.bg-subtle.rounded-2xl',
+        'div[class*="bg-subtle"][class*="rounded"]'
       ],
       assistantMessage: [
-        'p[class*="my-2"]:has([data-pplx-citation])',
-        'p[class*="my-2"]:has(strong)',
-        'p.my-2'
+        'p[class*="my-2"]'
       ],
       messageText: [
+        'span.select-text.break-words',
+        'span.break-words',
         'p',
         'span'
       ],
