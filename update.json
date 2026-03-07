@@ -1,5 +1,5 @@
 {
-  "version": "0.9.6",
-  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/download/v0.9.6/memorybridge-0.9.6.zip",
-  "changelog": "Fixed critical bug: providers.js const not shared across scripts, fixed chrome:// URL error"
+  "version": "0.10.0",
+  "download_url": "https://github.com/leeyaoming111-rgb/memorybridge/releases/download/v0.10.0/memorybridge-0.10.0.zip",
+  "changelog": "Stable rollback: restored original capture, null-safe popup, fixed tab switching"
 }

@@ -1,6 +1,6 @@
 /**
  * MemoryBridge — Popup Controller (popup.js)
- * All DOM access uses safe helpers to prevent null reference errors.
+ * v0.8.1 — Clean rollback with null-safe DOM access.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -19,7 +19,7 @@ function $(id) { return document.getElementById(id); }
 function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
 function on(id, evt, fn) { const el = $(id); if (el) el.addEventListener(evt, fn); }
 
-// ─── Messaging Helpers ─────────────────────────────────────────
+// ─── Messaging ────────────────────────────────────────────────
 function sendBg(type, payload = {}) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type, payload }, (response) => {
@@ -117,10 +117,7 @@ function renderProfile(profile) {
       <div class="empty-state">
         <div class="empty-state-icon"><img src="icons/icon48.png" style="width: 32px; height: 32px; opacity: 0.4;" /></div>
         <div class="empty-state-title">No memory yet</div>
-        <div class="empty-state-text">
-          Start chatting with any AI assistant.<br>
-          MemoryBridge will capture and learn.
-        </div>
+        <div class="empty-state-text">Start chatting with any AI assistant.<br>MemoryBridge will capture and learn.</div>
       </div>`;
     return;
   }
@@ -238,23 +235,23 @@ async function loadBuffer() {
         <div class="empty-state">
           <div class="empty-state-icon"><img src="icons/icon48.png" style="width: 32px; height: 32px; opacity: 0.4;" /></div>
           <div class="empty-state-title">Buffer empty</div>
-          <div class="empty-state-text">No messages captured yet.<br>Visit any supported AI chatbot to start.</div>
+          <div class="empty-state-text">No messages captured yet.<br>Visit ChatGPT, Claude, or Gemini to start.</div>
         </div>`;
       return;
     }
 
     const recent = buffer.slice(-50).reverse();
     listEl.innerHTML = recent.map(entry => {
-      const preview = entry.message?.text?.substring(0, 120) || "(empty)";
+      const preview = entry.message?.text?.substring(0, 120) || entry.text?.substring(0, 120) || "(empty)";
       const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "";
       return `
         <div class="buffer-item">
-          <div class="buffer-item-header">
+          <div class="buffer-item-header" style="display: flex; gap: 8px; align-items: center; margin-bottom: 2px;">
             <span class="buffer-provider ${entry.provider}">${entry.providerName || entry.provider}</span>
             <span style="color: var(--text-muted); font-size: 10px;">${time}</span>
           </div>
-          <div class="buffer-item-role">${entry.message?.role || "?"}</div>
-          <div class="buffer-item-preview">${escapeHtml(preview)}${preview.length >= 120 ? "..." : ""}</div>
+          <div style="font-size: 10px; color: var(--text-muted);">${entry.message?.role || entry.role || "?"}</div>
+          <div style="color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${escapeHtml(preview)}${preview.length >= 120 ? "..." : ""}</div>
         </div>`;
     }).join("");
   } catch (err) {
@@ -364,49 +361,14 @@ function bindActions() {
     catch { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); showToast("Copied to clipboard"); }
   });
 
-  // Inject — tries content script first, falls back to chrome.scripting for Comet etc.
   on("btnInjectContext", "click", async () => {
     try {
       const { prompt } = await sendBg("GET_CONTEXT_PROMPT");
-      const prefix = `[Context from my MemoryBridge profile — this describes who I am and my preferences]\n\n${prompt}\n\n---\n\nNow, here's what I need help with:\n\n`;
-
-      // Try content script first
-      try { await sendTab("INJECT_MEMORY", { memoryText: prompt }); showToast("Injected into page"); return; } catch (_) {}
-
-      // Fallback: programmatic injection (works on any page, needed for Comet)
-      try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab?.id) {
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: (text) => {
-              const sels = ['#ask-input[contenteditable="true"]', '#ask-input', '[data-lexical-editor="true"]', 'div.ProseMirror[contenteditable="true"]', '#prompt-textarea[contenteditable="true"]', '#prompt-textarea', '[contenteditable="true"][data-placeholder]', 'textarea'];
-              let ed = null;
-              for (const s of sels) { ed = document.querySelector(s); if (ed) break; }
-              if (!ed) { navigator.clipboard.writeText(text); return "clipboard"; }
-              ed.focus();
-              if (ed.tagName === "TEXTAREA" || ed.tagName === "INPUT") {
-                ed.value = text;
-                ed.dispatchEvent(new Event("input", { bubbles: true }));
-              } else {
-                const lines = text.split("\n");
-                let html = "";
-                for (const l of lines) { html += l.trim() === "" ? "<p><br></p>" : `<p>${l.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`; }
-                ed.innerHTML = html;
-                ed.dispatchEvent(new Event("focus", { bubbles: true }));
-                ed.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-              }
-              return "ok";
-            },
-            args: [prefix]
-          });
-          showToast("Injected into page");
-          return;
-        }
-      } catch (_) {}
-
+      await sendTab("INJECT_MEMORY", { memoryText: prompt });
+      showToast("Injected into page");
+    } catch (err) {
       showToast("Not on a chatbot page");
-    } catch { showToast("Not on a chatbot page"); }
+    }
   });
 
   on("btnSaveSettings", "click", async () => {
@@ -432,30 +394,6 @@ function bindActions() {
 
   on("btnClearBuffer", "click", async () => {
     if (confirm("Clear all buffered messages?")) { await sendBg("CLEAR_RAW_BUFFER"); loadBuffer(); showToast("Buffer cleared"); }
-  });
-
-  // Manual capture from page (for Comet and sidebar chatbots)
-  on("btnScrape", "click", async () => {
-    const btn = $("btnScrape");
-    if (!btn) return;
-    btn.disabled = true;
-    btn.textContent = "Capturing...";
-    try {
-      const result = await sendBg("SCRAPE_ACTIVE_TAB");
-      if (result.error) {
-        showToast(result.error);
-      } else if (result.captured === 0) {
-        showToast(result.message || "No new messages found");
-      } else {
-        showToast(`Captured ${result.captured} messages from ${result.provider}`);
-        loadBuffer();
-        loadStats();
-      }
-    } catch (err) {
-      showToast("Capture failed: " + err.message);
-    }
-    btn.disabled = false;
-    btn.textContent = "Capture from page";
   });
 
   on("btnClearAll", "click", async () => {

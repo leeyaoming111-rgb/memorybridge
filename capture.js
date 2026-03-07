@@ -1,22 +1,87 @@
 /**
  * MemoryBridge — Content Script (capture.js)
- *
- * Runs on chatbot pages. Uses the provider registry (providers.js)
- * to detect the current AI, observe DOM for messages, extract text,
- * and inject memory context.
- *
- * providers.js must be loaded before this script.
+ * 
+ * Runs on chatbot pages. Detects which provider we're on,
+ * observes the DOM for new messages, extracts text, and
+ * sends it to the background service worker for storage.
  */
 
 (() => {
   "use strict";
 
-  // Verify providers.js loaded
-  if (typeof PROVIDERS === "undefined" || typeof detectProvider === "undefined") {
-    console.error("[MemoryBridge] providers.js not loaded — capture cannot start");
-    return;
-  }
-  console.log("[MemoryBridge] capture.js loaded, providers available:", Object.keys(PROVIDERS).join(", "));
+  // ─── Provider Detection ──────────────────────────────────────
+  const PROVIDERS = {
+    chatgpt: {
+      hostPatterns: ["chat.openai.com", "chatgpt.com"],
+      name: "ChatGPT",
+      selectors: {
+        conversationContainer: [
+          'main [class*="react-scroll-to-bottom"]',
+          'main',
+          '[role="presentation"]'
+        ],
+        userMessage: [
+          '[data-message-author-role="user"]',
+          '[class*="user-turn"]',
+          '.text-base:has(.whitespace-pre-wrap)'
+        ],
+        assistantMessage: [
+          '[data-message-author-role="assistant"]',
+          '[class*="agent-turn"]',
+          '.markdown'
+        ],
+        messageText: [
+          '.whitespace-pre-wrap',
+          '.markdown',
+          'p'
+        ]
+      }
+    },
+    claude: {
+      hostPatterns: ["claude.ai"],
+      name: "Claude",
+      // Claude uses custom extraction — see extractClaudeMessages()
+      useCustomExtraction: true,
+      selectors: {
+        conversationContainer: [
+          '[class*="conversation"]',
+          'main',
+          '[role="main"]'
+        ],
+        userMessage: [],
+        assistantMessage: [],
+        messageText: ['p']
+      }
+    },
+    gemini: {
+      hostPatterns: ["gemini.google.com"],
+      name: "Gemini",
+      selectors: {
+        conversationContainer: [
+          'chat-window',
+          'main',
+          '.conversation-container'
+        ],
+        userMessage: [
+          'user-query',
+          '.query-content',
+          '[class*="user-query"]',
+          '.request-content'
+        ],
+        assistantMessage: [
+          'model-response',
+          '.response-content',
+          '[class*="model-response"]',
+          'message-content'
+        ],
+        messageText: [
+          '.markdown-main-panel',
+          '.response-content',
+          'p'
+        ]
+      }
+    }
+  };
 
   // ─── State ───────────────────────────────────────────────────
   let currentProvider = null;
@@ -30,6 +95,16 @@
   // ─── Utility ─────────────────────────────────────────────────
   function generateConversationId() {
     return `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function detectProvider() {
+    const host = window.location.hostname;
+    for (const [key, provider] of Object.entries(PROVIDERS)) {
+      if (provider.hostPatterns.some(h => host.includes(h))) {
+        return { key, ...provider };
+      }
+    }
+    return null;
   }
 
   function trySelectors(selectors, root = document) {
@@ -76,19 +151,10 @@
     return hash.toString(36);
   }
 
-  function getElementPosition(el) {
-    const rect = el.getBoundingClientRect();
-    return el.offsetTop || rect.top;
-  }
-
-  function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  // ─── Custom Extraction: Claude ───────────────────────────────
-  // Claude renders paragraphs as separate <p> tags grouped by role.
+  // ─── Claude-Specific Extraction ──────────────────────────────
   function extractClaudeMessages() {
     const messages = [];
+
     const allParagraphs = document.querySelectorAll(
       'p.whitespace-pre-wrap, p.font-claude-response-body'
     );
@@ -120,7 +186,11 @@
 
       if (role !== currentRole) {
         if (currentRole && currentTexts.length > 0) {
-          messages.push({ role: currentRole, text: currentTexts.join('\n\n'), timestamp: Date.now() });
+          messages.push({
+            role: currentRole,
+            text: currentTexts.join('\n\n'),
+            timestamp: Date.now()
+          });
         }
         currentRole = role;
         currentTexts = [text];
@@ -130,27 +200,24 @@
     }
 
     if (currentRole && currentTexts.length > 0) {
-      messages.push({ role: currentRole, text: currentTexts.join('\n\n'), timestamp: Date.now() });
+      messages.push({
+        role: currentRole,
+        text: currentTexts.join('\n\n'),
+        timestamp: Date.now()
+      });
     }
 
     return messages;
   }
 
-  // ─── Custom extraction registry ──────────────────────────────
-  const CUSTOM_EXTRACTORS = {
-    claude: extractClaudeMessages,
-  };
-
-  // ─── Generic Message Extraction ──────────────────────────────
+  // ─── Message Extraction ──────────────────────────────────────
   function extractAllMessages() {
     if (!currentProvider) return [];
 
-    // Use custom extractor if defined
-    if (currentProvider.extraction === "custom" && CUSTOM_EXTRACTORS[currentProvider.key]) {
-      return CUSTOM_EXTRACTORS[currentProvider.key]();
+    if (currentProvider.useCustomExtraction && currentProvider.key === 'claude') {
+      return extractClaudeMessages();
     }
 
-    // Generic: find user + assistant elements, sort by DOM position
     const userEls = trySelectorsAll(currentProvider.selectors.userMessage);
     const assistantEls = trySelectorsAll(currentProvider.selectors.assistantMessage);
 
@@ -173,13 +240,18 @@
     }).filter(Boolean);
   }
 
+  function getElementPosition(el) {
+    const rect = el.getBoundingClientRect();
+    return el.offsetTop || rect.top;
+  }
+
   // ─── Capture Pipeline ───────────────────────────────────────
   function checkForNewMessages() {
     if (!captureEnabled) return;
 
     const currentMessages = extractAllMessages();
-    const newMessages = [];
 
+    const newMessages = [];
     for (const msg of currentMessages) {
       const fp = fingerprint(msg.role + ':' + msg.text);
       if (!capturedFingerprints.has(fp)) {
@@ -230,7 +302,11 @@
 
       chrome.runtime.sendMessage({
         type: "NEW_CONVERSATION",
-        payload: { conversationId, provider: currentProvider.key, url: currentUrl }
+        payload: {
+          conversationId,
+          provider: currentProvider.key,
+          url: currentUrl
+        }
       }).catch(() => {});
     }
   }
@@ -239,9 +315,9 @@
   function startObserving() {
     if (observer) observer.disconnect();
 
-    const target = trySelectors(currentProvider.selectors.container) || document.body;
+    const target = trySelectors(currentProvider.selectors.conversationContainer) || document.body;
 
-    observer = new MutationObserver(() => {
+    observer = new MutationObserver((mutations) => {
       clearTimeout(startObserving._debounce);
       startObserving._debounce = setTimeout(() => {
         checkForNewMessages();
@@ -249,146 +325,17 @@
       }, 800);
     });
 
-    observer.observe(target, { childList: true, subtree: true, characterData: true });
+    observer.observe(target, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
+    // Initial extraction
     setTimeout(checkForNewMessages, 2000);
   }
 
-  // ─── Injection Engine ───────────────────────────────────────
-  // Data-driven injection based on provider.injection type.
-
-  function injectMemoryContext(memoryText) {
-    const prefix = `[Context from my MemoryBridge profile — this describes who I am and my preferences]\n\n${memoryText}\n\n---\n\nNow, here's what I need help with:\n\n`;
-
-    if (!currentProvider) {
-      console.warn("[MemoryBridge] No provider detected, can't inject");
-      return;
-    }
-
-    const editor = trySelectors(currentProvider.selectors.inputField);
-    if (!editor) {
-      console.warn(`[MemoryBridge] Could not find input field for ${currentProvider.name}`);
-      fallbackCopy(prefix);
-      return;
-    }
-
-    let success = false;
-    const method = currentProvider.injection;
-
-    if (method === "execCommand") {
-      success = injectExecCommand(editor, prefix);
-    } else if (method === "reactHTML") {
-      success = injectReactHTML(editor, prefix);
-    } else if (method === "textarea") {
-      success = injectTextarea(editor, prefix);
-    } else if (method === "auto") {
-      // Try methods in order of likelihood
-      if (editor.tagName === "TEXTAREA" || editor.tagName === "INPUT") {
-        success = injectTextarea(editor, prefix);
-      } else if (editor.contentEditable === "true") {
-        success = injectExecCommand(editor, prefix);
-        if (!success) success = injectReactHTML(editor, prefix);
-      }
-    }
-
-    if (!success) {
-      fallbackCopy(prefix);
-    } else {
-      console.log(`[MemoryBridge] Injected into ${currentProvider.name}`);
-    }
-  }
-
-  /** ProseMirror / standard contenteditable */
-  function injectExecCommand(editor, text) {
-    try {
-      editor.focus();
-      document.execCommand("selectAll");
-      document.execCommand("delete");
-      document.execCommand("insertText", false, text);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /** React-managed contenteditable (ChatGPT, Lexical) */
-  function injectReactHTML(editor, text) {
-    try {
-      editor.focus();
-
-      const lines = text.split("\n");
-      let html = "";
-      for (const line of lines) {
-        html += line.trim() === "" ? "<p><br></p>" : `<p>${escapeHtml(line)}</p>`;
-      }
-      editor.innerHTML = html;
-
-      editor.dispatchEvent(new Event("focus", { bubbles: true }));
-      editor.dispatchEvent(new InputEvent("beforeinput", {
-        bubbles: true, cancelable: true, inputType: "insertText", data: text
-      }));
-      editor.dispatchEvent(new InputEvent("input", {
-        bubbles: true, cancelable: false, inputType: "insertText", data: text
-      }));
-
-      // Try React fiber state update
-      try {
-        const key = Object.keys(editor).find(k =>
-          k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance")
-        );
-        if (key) {
-          let fiber = editor[key];
-          while (fiber) {
-            if (fiber.memoizedState?.queue) {
-              editor.dispatchEvent(new Event("change", { bubbles: true }));
-              break;
-            }
-            if (fiber.stateNode?.props?.onChange) {
-              fiber.stateNode.props.onChange({ target: editor });
-              break;
-            }
-            fiber = fiber.return;
-          }
-        }
-      } catch (_) {}
-
-      // Place cursor at end
-      try {
-        const range = document.createRange();
-        const sel = window.getSelection();
-        const lastNode = editor.lastElementChild || editor;
-        range.selectNodeContents(lastNode);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } catch (_) {}
-
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /** Plain textarea / input */
-  function injectTextarea(editor, text) {
-    try {
-      editor.focus();
-      editor.value = text;
-      editor.dispatchEvent(new Event("input", { bubbles: true }));
-      editor.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /** Clipboard fallback */
-  function fallbackCopy(text) {
-    navigator.clipboard.writeText(text).then(() => {
-      console.log("[MemoryBridge] Copied to clipboard — paste manually with Ctrl+V");
-    }).catch(() => {});
-  }
-
-  // ─── Message Listener ──────────────────────────────────────
+  // ─── Message Listener (from popup/background) ───────────────
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     switch (msg.type) {
       case "GET_CAPTURE_STATUS":
@@ -417,20 +364,151 @@
     }
   });
 
-  // ─── Initialize ──────────────────────────────────────────────
-  let initRetries = 0;
-  const MAX_RETRIES = 5;
-  const RETRY_INTERVAL = 3000;
-
-  function init() {
-    currentProvider = detectProvider(window.location.hostname);
+  // ─── Memory Injection ───────────────────────────────────────
+  function injectMemoryContext(memoryText) {
+    const prefix = `[Context from my MemoryBridge profile — this describes who I am and my preferences]\n\n${memoryText}\n\n---\n\nNow, here's what I need help with:\n\n`;
 
     if (!currentProvider) {
-      // Retry a few times for late-loading sidebars (e.g. Comet)
-      if (initRetries < MAX_RETRIES) {
-        initRetries++;
-        setTimeout(init, RETRY_INTERVAL);
+      console.warn("[MemoryBridge] No provider detected, can't inject");
+      return;
+    }
+
+    let success = false;
+
+    if (currentProvider.key === "claude") {
+      success = injectIntoClaude(prefix);
+    } else if (currentProvider.key === "chatgpt") {
+      success = injectIntoChatGPT(prefix);
+    } else if (currentProvider.key === "gemini") {
+      success = injectIntoGemini(prefix);
+    }
+
+    if (!success) {
+      navigator.clipboard.writeText(prefix).then(() => {
+        console.log("[MemoryBridge] Copied to clipboard as fallback — paste manually with Ctrl+V");
+      }).catch(() => {});
+    }
+  }
+
+  function injectIntoClaude(text) {
+    const editor = document.querySelector(
+      'div.ProseMirror[contenteditable="true"], ' +
+      '[contenteditable="true"].ProseMirror, ' +
+      '[contenteditable="true"][data-placeholder]'
+    );
+
+    if (!editor) {
+      console.warn("[MemoryBridge] Could not find Claude's editor");
+      return false;
+    }
+
+    editor.focus();
+    document.execCommand("selectAll");
+    document.execCommand("delete");
+    document.execCommand("insertText", false, text);
+    console.log("[MemoryBridge] Injected into Claude editor");
+    return true;
+  }
+
+  function injectIntoChatGPT(text) {
+    const editor = document.querySelector(
+      '#prompt-textarea[contenteditable="true"], ' +
+      '#prompt-textarea, ' +
+      '[contenteditable="true"][data-id="root"]'
+    );
+
+    if (!editor) {
+      console.warn("[MemoryBridge] Could not find ChatGPT's input");
+      return false;
+    }
+
+    editor.focus();
+
+    const lines = text.split("\n");
+    let html = "";
+    for (const line of lines) {
+      if (line.trim() === "") {
+        html += "<p><br></p>";
+      } else {
+        html += `<p>${line.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`;
       }
+    }
+
+    editor.innerHTML = html;
+
+    editor.dispatchEvent(new Event("focus", { bubbles: true }));
+    editor.dispatchEvent(new InputEvent("beforeinput", {
+      bubbles: true, cancelable: true, inputType: "insertText", data: text
+    }));
+    editor.dispatchEvent(new InputEvent("input", {
+      bubbles: true, cancelable: false, inputType: "insertText", data: text
+    }));
+
+    try {
+      const key = Object.keys(editor).find(k => k.startsWith("__reactFiber") || k.startsWith("__reactInternalInstance"));
+      if (key) {
+        let fiber = editor[key];
+        while (fiber) {
+          if (fiber.memoizedState?.queue) {
+            editor.dispatchEvent(new Event("change", { bubbles: true }));
+            break;
+          }
+          if (fiber.stateNode?.props?.onChange) {
+            fiber.stateNode.props.onChange({ target: editor });
+            break;
+          }
+          fiber = fiber.return;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const range = document.createRange();
+      const sel = window.getSelection();
+      const lastNode = editor.lastElementChild || editor;
+      range.selectNodeContents(lastNode);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) {}
+
+    console.log("[MemoryBridge] Injected into ChatGPT editor");
+    return true;
+  }
+
+  function injectIntoGemini(text) {
+    const editor = document.querySelector(
+      'rich-textarea .ql-editor, ' +
+      'rich-textarea [contenteditable="true"], ' +
+      '.text-input-field [contenteditable="true"], ' +
+      'textarea'
+    );
+
+    if (!editor) {
+      console.warn("[MemoryBridge] Could not find Gemini's input");
+      return false;
+    }
+
+    editor.focus();
+
+    if (editor.tagName === "TEXTAREA") {
+      editor.value = text;
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    } else {
+      document.execCommand("selectAll");
+      document.execCommand("delete");
+      document.execCommand("insertText", false, text);
+    }
+
+    console.log("[MemoryBridge] Injected into Gemini editor");
+    return true;
+  }
+
+  // ─── Initialize ──────────────────────────────────────────────
+  function init() {
+    currentProvider = detectProvider();
+    if (!currentProvider) {
+      console.log("[MemoryBridge] No supported provider detected on this page.");
       return;
     }
 

@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "MemoryBridge",
-  "version": "0.9.6",
+  "version": "0.10.0",
   "description": "Capture AI conversations, distill them into a portable memory profile, and inject context into new chats.",
-  "permissions": ["storage", "activeTab", "alarms", "scripting"],
+  "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": [
     "https://raw.githubusercontent.com/*",
     "https://api.github.com/*"
@@ -36,15 +36,9 @@
         "https://chat.openai.com/*",
         "https://chatgpt.com/*",
         "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://perplexity.ai/*",
-        "https://www.perplexity.ai/*",
-        "https://copilot.microsoft.com/*",
-        "https://grok.com/*",
-        "https://chat.deepseek.com/*",
-        "https://poe.com/*"
+        "https://gemini.google.com/*"
       ],
-      "js": ["providers.js", "capture.js"],
+      "js": ["capture.js"],
       "run_at": "document_idle"
     }
   ]

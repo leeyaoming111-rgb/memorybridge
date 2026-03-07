@@ -25,7 +25,7 @@ const STORAGE_KEYS = {
 // Set to "" to disable update checks entirely.
 const UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/leeyaoming111-rgb/memorybridge/main/update.json";
 const UPDATE_CHECK_INTERVAL_HOURS = 6;
-const CURRENT_VERSION = "0.9.6";
+const CURRENT_VERSION = "0.10.0";
 
 const DEFAULT_SETTINGS = {
   captureEnabled: true,
@@ -110,11 +110,6 @@ chrome.runtime.onInstalled.addListener(() => {
       periodInMinutes: UPDATE_CHECK_INTERVAL_HOURS * 60
     });
   }
-  // Poll for sidebar/overlay chatbot messages (Comet etc.) every minute
-  chrome.alarms.create("mb_sidebar_capture", {
-    delayInMinutes: 1,
-    periodInMinutes: 1
-  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -122,9 +117,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     checkForUpdate().catch(err => {
       console.warn("[MemoryBridge] Update check failed:", err.message);
     });
-  }
-  if (alarm.name === "mb_sidebar_capture") {
-    pollActiveTabForMessages().catch(() => {});
   }
 });
 
@@ -202,157 +194,6 @@ async function getReleaseHistory() {
   }
 }
 
-// ─── Sidebar Capture (for Comet, overlay chatbots) ────────────
-// Polls the active tab using chrome.scripting to extract messages
-// from sidebar/overlay chatbots where content scripts can't run.
-
-const SIDEBAR_SCRAPE_FN = () => {
-  // Detect Comet/Perplexity sidebar by looking for known DOM elements
-  const askInput = document.querySelector('#ask-input[data-lexical-editor="true"]') ||
-                   document.querySelector('[aria-placeholder="Ask anything…"]');
-  if (!askInput) return null; // No sidebar detected
-
-  const messages = [];
-
-  // User messages: spans with select-text break-words (main chat + sidebar)
-  document.querySelectorAll('span.min-w-0.font-sans.text-base.font-normal.select-text.break-words, span.min-w-0.select-text.break-words, div.bg-subtle.rounded-2xl').forEach(el => {
-    // For div wrappers, find the inner span; for spans, use directly
-    const span = el.tagName === 'SPAN' ? el : (el.querySelector('span.select-text.break-words') || el.querySelector('span.break-words'));
-    if (span) {
-      const text = span.textContent?.trim();
-      if (text && text.length > 1) messages.push({ role: "user", text, timestamp: Date.now() });
-    }
-  });
-
-  // Assistant messages: paragraphs with citations or strong tags
-  document.querySelectorAll('p[class*="my-2"]').forEach(el => {
-    const text = el.textContent?.replace(/\s+/g, " ").trim();
-    if (text && text.length > 5) messages.push({ role: "assistant", text, timestamp: Date.now() });
-  });
-
-  return messages.length > 0 ? { provider: "comet", providerName: "Comet", messages } : null;
-};
-
-async function pollActiveTabForMessages() {
-  try {
-    const settings = await getSettings();
-    if (!settings.captureEnabled) return;
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !tab.url) return;
-    // Skip internal browser pages (chrome://, comet://, about:, etc.)
-    if (!tab.url.startsWith("http://") && !tab.url.startsWith("https://")) return;
-
-    // Skip pages where content scripts already run
-    const chatbotHosts = ["chat.openai.com", "chatgpt.com", "claude.ai", "gemini.google.com",
-                          "perplexity.ai", "copilot.microsoft.com", "grok.com", "chat.deepseek.com", "poe.com"];
-    try {
-      const url = new URL(tab.url);
-      if (chatbotHosts.some(h => url.hostname.includes(h))) return;
-    } catch { return; }
-
-    // Inject scraper into the active tab
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: SIDEBAR_SCRAPE_FN
-    });
-
-    const data = results?.[0]?.result;
-    if (!data || !data.messages?.length) return;
-
-    // Store new messages (deduplicate against buffer)
-    const bufferResult = await chrome.storage.local.get([STORAGE_KEYS.RAW_BUFFER, STORAGE_KEYS.STATS]);
-    const buffer = bufferResult[STORAGE_KEYS.RAW_BUFFER] || [];
-    const stats = bufferResult[STORAGE_KEYS.STATS] || DEFAULT_STATS;
-    const settings2 = await getSettings();
-
-    let newCount = 0;
-    const convId = `comet_${tab.id}_${Math.floor(Date.now() / 60000)}`; // groups messages within same minute
-
-    for (const msg of data.messages) {
-      const isDup = buffer.some(b =>
-        b.provider === data.provider &&
-        b.role === msg.role &&
-        b.text === msg.text
-      );
-      if (!isDup) {
-        buffer.push({
-          conversationId: convId,
-          provider: data.provider,
-          providerName: data.providerName,
-          role: msg.role,
-          text: msg.text,
-          timestamp: msg.timestamp,
-          url: tab.url
-        });
-        stats.totalMessages++;
-        stats.messagesByProvider[data.provider] = (stats.messagesByProvider[data.provider] || 0) + 1;
-        stats.lastCapture = Date.now();
-        newCount++;
-      }
-    }
-
-    if (newCount > 0) {
-      await chrome.storage.local.set({
-        [STORAGE_KEYS.RAW_BUFFER]: buffer,
-        [STORAGE_KEYS.STATS]: stats
-      });
-      console.log(`[MemoryBridge] Sidebar capture: ${newCount} new messages from ${data.providerName}`);
-
-      // Auto-distill check
-      const isSession = settings2.apiProvider?.startsWith("session_");
-      const canDistill = isSession || settings2.apiKey;
-      if (settings2.autoDistill && canDistill && buffer.length >= settings2.distillThreshold) {
-        runDistillation().catch(err => console.error("[MemoryBridge] Auto-distill error:", err));
-      }
-    }
-  } catch (err) {
-    // Silently fail — this runs every minute, most tabs won't have a sidebar
-  }
-}
-
-// Also allow manual trigger from popup
-async function scrapeActiveTab() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) return { error: "No active tab" };
-
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: SIDEBAR_SCRAPE_FN
-    });
-
-    const data = results?.[0]?.result;
-    if (!data || !data.messages?.length) return { captured: 0, message: "No sidebar messages found on this page" };
-
-    const bufferResult = await chrome.storage.local.get([STORAGE_KEYS.RAW_BUFFER, STORAGE_KEYS.STATS]);
-    const buffer = bufferResult[STORAGE_KEYS.RAW_BUFFER] || [];
-    const stats = bufferResult[STORAGE_KEYS.STATS] || DEFAULT_STATS;
-
-    let newCount = 0;
-    const convId = `comet_manual_${Date.now()}`;
-
-    for (const msg of data.messages) {
-      const isDup = buffer.some(b => b.provider === data.provider && b.role === msg.role && b.text === msg.text);
-      if (!isDup) {
-        buffer.push({
-          conversationId: convId, provider: data.provider, providerName: data.providerName,
-          role: msg.role, text: msg.text, timestamp: msg.timestamp, url: tab.url
-        });
-        stats.totalMessages++;
-        stats.messagesByProvider[data.provider] = (stats.messagesByProvider[data.provider] || 0) + 1;
-        stats.lastCapture = Date.now();
-        newCount++;
-      }
-    }
-
-    await chrome.storage.local.set({ [STORAGE_KEYS.RAW_BUFFER]: buffer, [STORAGE_KEYS.STATS]: stats });
-    return { captured: newCount, total: data.messages.length, provider: data.providerName };
-  } catch (err) {
-    return { error: err.message };
-  }
-}
-
 // ─── Message Router ────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender).then(sendResponse).catch(err => {
@@ -370,8 +211,6 @@ async function handleMessage(msg, sender) {
       return await handleNewConversation(msg.payload);
     case "CONTENT_SCRIPT_READY":
       return { acknowledged: true };
-    case "SCRAPE_ACTIVE_TAB":
-      return await scrapeActiveTab();
     case "UPDATE_BADGE":
       setBadgeCount(msg.payload.count);
       return { ok: true };
