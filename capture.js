@@ -11,7 +11,12 @@
 (() => {
   "use strict";
 
-  // PROVIDERS is defined in providers.js (loaded first via manifest content_scripts)
+  // Verify providers.js loaded
+  if (typeof PROVIDERS === "undefined" || typeof detectProvider === "undefined") {
+    console.error("[MemoryBridge] providers.js not loaded — capture cannot start");
+    return;
+  }
+  console.log("[MemoryBridge] capture.js loaded, providers available:", Object.keys(PROVIDERS).join(", "));
 
   // ─── State ───────────────────────────────────────────────────
   let currentProvider = null;

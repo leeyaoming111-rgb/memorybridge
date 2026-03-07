@@ -1,5 +1,6 @@
 /**
  * MemoryBridge — Popup Controller (popup.js)
+ * All DOM access uses safe helpers to prevent null reference errors.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -13,15 +14,17 @@ document.addEventListener("DOMContentLoaded", () => {
   bindActions();
 });
 
+// ─── Safe DOM Helpers ─────────────────────────────────────────
+function $(id) { return document.getElementById(id); }
+function setText(id, v) { const el = $(id); if (el) el.textContent = v; }
+function on(id, evt, fn) { const el = $(id); if (el) el.addEventListener(evt, fn); }
+
 // ─── Messaging Helpers ─────────────────────────────────────────
 function sendBg(type, payload = {}) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage({ type, payload }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve(response);
-      }
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(response);
     });
   });
 }
@@ -31,11 +34,8 @@ function sendTab(type, payload = {}) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (!tabs[0]) return reject(new Error("No active tab"));
       chrome.tabs.sendMessage(tabs[0].id, { type, payload }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(response);
-        }
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(response);
       });
     });
   });
@@ -48,9 +48,9 @@ function initTabs() {
       document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
       document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
       tab.classList.add("active");
-      document.getElementById(`tab-${tab.dataset.tab}`).classList.add("active");
+      const panel = $(`tab-${tab.dataset.tab}`);
+      if (panel) panel.classList.add("active");
 
-      // Refresh data when switching tabs
       const tabName = tab.dataset.tab;
       if (tabName === "memory") { loadStats(); loadMemoryProfile(); }
       if (tabName === "capture") { loadBuffer(); }
@@ -63,10 +63,9 @@ function initTabs() {
 async function loadStats() {
   try {
     const stats = await sendBg("GET_STATS");
-    document.getElementById("statMessages").textContent = stats.totalMessages || 0;
-    document.getElementById("statDistills").textContent = stats.totalDistillations || 0;
+    setText("statMessages", stats.totalMessages || 0);
+    setText("statDistills", stats.totalDistillations || 0);
 
-    // Count actionable profile items
     const profile = await sendBg("GET_MEMORY_PROFILE");
     const ip = profile.interaction_preferences || {};
     const prefCount = (ip.learning_style?.length || 0) + (ip.response_format?.length || 0) +
@@ -75,17 +74,18 @@ async function loadStats() {
       (profile.expertise?.length || 0) +
       (profile.tools_and_stack?.length || 0) +
       (profile.facts?.length || 0);
-    document.getElementById("statFacts").textContent = factCount;
+    setText("statFacts", factCount);
 
-    // Update status dot
-    const dot = document.getElementById("statusDot");
-    try {
-      const status = await sendTab("GET_CAPTURE_STATUS");
-      dot.classList.toggle("inactive", !status.enabled);
-      dot.title = status.enabled ? `Capturing on ${status.provider}` : "Capture paused";
-    } catch {
-      dot.classList.add("inactive");
-      dot.title = "Not on a chatbot page";
+    const dot = $("statusDot");
+    if (dot) {
+      try {
+        const status = await sendTab("GET_CAPTURE_STATUS");
+        dot.classList.toggle("inactive", !status.enabled);
+        dot.title = status.enabled ? `Capturing on ${status.provider}` : "Capture paused";
+      } catch {
+        dot.classList.add("inactive");
+        dot.title = "Not on a chatbot page";
+      }
     }
   } catch (err) {
     console.error("Failed to load stats:", err);
@@ -103,8 +103,9 @@ async function loadMemoryProfile() {
 }
 
 function renderProfile(profile) {
-  const container = document.getElementById("profileContent");
-  
+  const container = $("profileContent");
+  if (!container) return;
+
   const hasData = profile.lastUpdated ||
     (profile.interaction_preferences && Object.values(profile.interaction_preferences).some(v => v && (Array.isArray(v) ? v.length > 0 : true))) ||
     (profile.facts || []).length > 0 ||
@@ -126,36 +127,31 @@ function renderProfile(profile) {
 
   let html = "";
 
-  // ── Interaction Preferences (lead with these) ──
   const ip = profile.interaction_preferences || {};
   const prefSections = [
-    { key: "learning_style", icon: "", label: "How I Learn" },
-    { key: "response_format", icon: "", label: "Response Format" },
-    { key: "tone", icon: "", label: "Preferred Tone" },
-    { key: "likes", icon: "", label: "Things I Like" },
-    { key: "pet_peeves", icon: "", label: "Pet Peeves" }
+    { key: "learning_style", label: "How I Learn" },
+    { key: "response_format", label: "Response Format" },
+    { key: "tone", label: "Preferred Tone" },
+    { key: "likes", label: "Things I Like" },
+    { key: "pet_peeves", label: "Pet Peeves" }
   ];
 
   const hasPrefs = prefSections.some(s => ip[s.key]?.length) || ip.depth || ip.verbosity;
   if (hasPrefs) {
     html += `<div class="profile-card"><h3>Interaction Preferences</h3>`;
-
     if (ip.verbosity || ip.depth) {
       html += `<div style="display: flex; gap: 8px; margin-bottom: 8px;">`;
       if (ip.verbosity) html += `<span class="tag accent">${escapeHtml(ip.verbosity)} verbosity</span>`;
       if (ip.depth) html += `<span class="tag accent">${escapeHtml(ip.depth)} depth</span>`;
       html += `</div>`;
     }
-
     for (const section of prefSections) {
       const items = ip[section.key];
       if (items?.length) {
         html += `<div style="margin-bottom: 8px;">`;
         html += `<div style="font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 4px;">${section.label}</div>`;
         items.forEach(item => {
-          html += `<div style="font-size: 12px; color: var(--text-secondary); padding: 2px 0; padding-left: 8px; border-left: 2px solid ${section.key === 'pet_peeves' ? 'var(--danger)' : 'var(--accent)'};">`;
-          html += escapeHtml(item);
-          html += `</div>`;
+          html += `<div style="font-size: 12px; color: var(--text-secondary); padding: 2px 0; padding-left: 8px; border-left: 2px solid ${section.key === 'pet_peeves' ? 'var(--danger)' : 'var(--accent)'};">${escapeHtml(item)}</div>`;
         });
         html += `</div>`;
       }
@@ -163,10 +159,9 @@ function renderProfile(profile) {
     html += `</div>`;
   }
 
-  // ── Communication Patterns ──
   const cp = profile.communication_patterns || {};
   if (cp.tone || cp.vocabulary_level || cp.asks_questions_like?.length) {
-    html += `<div class="profile-card"><h3>💬 Communication Style</h3>`;
+    html += `<div class="profile-card"><h3>Communication Style</h3>`;
     if (cp.tone) html += `<p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">${escapeHtml(cp.tone)}</p>`;
     if (cp.vocabulary_level) html += profileField("Vocabulary", cp.vocabulary_level);
     if (cp.asks_questions_like?.length) {
@@ -177,9 +172,8 @@ function renderProfile(profile) {
     html += `</div>`;
   }
 
-  // ── Expertise ──
   if (profile.expertise?.length) {
-    html += `<div class="profile-card"><h3>🎯 Expertise</h3><div class="tag-list">`;
+    html += `<div class="profile-card"><h3>Expertise</h3><div class="tag-list">`;
     profile.expertise.forEach(e => {
       const isHigh = e.level === "expert" || e.level === "advanced";
       html += `<span class="tag ${isHigh ? 'accent' : ''}">${escapeHtml(e.domain)} · ${e.level}</span>`;
@@ -187,102 +181,82 @@ function renderProfile(profile) {
     html += `</div></div>`;
   }
 
-  // ── Tools & Stack ──
   if (profile.tools_and_stack?.length) {
-    html += `<div class="profile-card"><h3>🔧 Tools & Stack</h3><div class="tag-list">`;
+    html += `<div class="profile-card"><h3>Tools & Stack</h3><div class="tag-list">`;
     profile.tools_and_stack.forEach(t => { html += `<span class="tag">${escapeHtml(t)}</span>`; });
     html += `</div></div>`;
   }
 
-  // ── Active Projects ──
   if (profile.active_projects?.length) {
-    html += `<div class="profile-card"><h3>📂 Active Projects</h3>`;
+    html += `<div class="profile-card"><h3>Active Projects</h3>`;
     profile.active_projects.forEach(p => {
       html += `<div style="padding: 4px 0; border-bottom: 1px solid var(--border);">`;
       html += `<div style="font-size: 12px; font-weight: 500; color: var(--text-primary);">${escapeHtml(p.name)}</div>`;
-      if (p.context) html += `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(p.context)}</div>`;
+      if (p.description) html += `<div style="font-size: 11px; color: var(--text-secondary);">${escapeHtml(p.description)}</div>`;
       html += `</div>`;
     });
     html += `</div>`;
   }
 
-  // ── Identity ──
   const id = profile.identity || {};
-  if (Object.keys(id).length > 0) {
-    html += `<div class="profile-card"><h3>👤 Identity</h3>`;
+  if (id.name || id.role || id.organization) {
+    html += `<div class="profile-card"><h3>Identity</h3>`;
     if (id.name) html += profileField("Name", id.name);
-    if (id.occupation) html += profileField("Occupation", id.occupation);
-    if (id.location) html += profileField("Location", id.location);
+    if (id.role) html += profileField("Role", id.role);
+    if (id.organization) html += profileField("Organization", id.organization);
     html += `</div>`;
   }
 
-  // ── Facts ──
   if (profile.facts?.length) {
-    html += `<div class="profile-card"><h3>📌 Known Facts</h3>`;
-    profile.facts.slice(0, 10).forEach(f => {
-      const confPct = Math.round((f.confidence || 0.5) * 100);
-      html += `
-        <div class="fact-item">
-          <span class="fact-badge">${escapeHtml(f.category || "other")}</span>
-          <span style="flex: 1; color: var(--text-secondary);">${escapeHtml(f.fact)}</span>
-          <div class="confidence-bar" title="${confPct}% confidence">
-            <div class="confidence-fill" style="width: ${confPct}%"></div>
-          </div>
-        </div>`;
+    html += `<div class="profile-card"><h3>Facts</h3>`;
+    profile.facts.forEach(f => {
+      html += `<div style="font-size: 12px; color: var(--text-secondary); padding: 2px 0; padding-left: 8px; border-left: 2px solid var(--border);">${escapeHtml(typeof f === "string" ? f : f.content || JSON.stringify(f))}</div>`;
     });
-    if (profile.facts.length > 10) {
-      html += `<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">+${profile.facts.length - 10} more facts</div>`;
-    }
     html += `</div>`;
-  }
-
-  // ── Last updated ──
-  if (profile.lastUpdated) {
-    html += `<div style="font-size: 10px; color: var(--text-muted); text-align: right; margin-top: 4px;">
-      Last distilled: ${new Date(profile.lastUpdated).toLocaleString()}
-    </div>`;
   }
 
   container.innerHTML = html;
 }
 
 function profileField(label, value) {
-  return `<div class="profile-field">
-    <span class="profile-field-label">${escapeHtml(label)}</span>
-    <span class="profile-field-value">${escapeHtml(value)}</span>
-  </div>`;
+  return `<div style="font-size: 12px; margin-bottom: 4px;">
+    <span style="color: var(--text-muted);">${escapeHtml(label)}:</span>
+    <span style="color: var(--text-secondary); margin-left: 4px;">${escapeHtml(value)}</span></div>`;
 }
 
 // ─── Buffer ────────────────────────────────────────────────────
 async function loadBuffer() {
   try {
-    const buffer = await sendBg("GET_RAW_BUFFER");
-    const countEl = document.getElementById("bufferCount");
-    countEl.textContent = `${buffer.length} messages buffered`;
+    const { buffer } = await sendBg("GET_RAW_BUFFER");
+    setText("bufferCount", buffer.length);
 
-    const listEl = document.getElementById("bufferList");
+    const listEl = $("bufferList");
+    if (!listEl) return;
 
     if (buffer.length === 0) {
-      listEl.innerHTML = `<div class="empty-state">
-        <div class="empty-state-text">No messages captured yet.<br>Visit any supported AI chatbot to start.</div>
-      </div>`;
+      listEl.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon"><img src="icons/icon48.png" style="width: 32px; height: 32px; opacity: 0.4;" /></div>
+          <div class="empty-state-title">Buffer empty</div>
+          <div class="empty-state-text">No messages captured yet.<br>Visit any supported AI chatbot to start.</div>
+        </div>`;
       return;
     }
 
-    // Show most recent first, limit to 50
     const recent = buffer.slice(-50).reverse();
-    listEl.innerHTML = recent.map(entry => `
-      <div class="buffer-item">
-        <div class="buffer-meta">
-          <span class="buffer-provider ${entry.provider}">${entry.providerName || entry.provider}</span>
-          <span class="buffer-role">${entry.role}</span>
-          <span style="margin-left: auto; font-size: 10px; color: var(--text-muted);">
-            ${new Date(entry.timestamp).toLocaleTimeString()}
-          </span>
-        </div>
-        <div class="buffer-text">${escapeHtml(entry.text.slice(0, 200))}</div>
-      </div>
-    `).join("");
+    listEl.innerHTML = recent.map(entry => {
+      const preview = entry.message?.text?.substring(0, 120) || "(empty)";
+      const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : "";
+      return `
+        <div class="buffer-item">
+          <div class="buffer-item-header">
+            <span class="buffer-provider ${entry.provider}">${entry.providerName || entry.provider}</span>
+            <span style="color: var(--text-muted); font-size: 10px;">${time}</span>
+          </div>
+          <div class="buffer-item-role">${entry.message?.role || "?"}</div>
+          <div class="buffer-item-preview">${escapeHtml(preview)}${preview.length >= 120 ? "..." : ""}</div>
+        </div>`;
+    }).join("");
   } catch (err) {
     console.error("Failed to load buffer:", err);
   }
@@ -291,15 +265,13 @@ async function loadBuffer() {
 // ─── Context Prompt ────────────────────────────────────────────
 async function loadContextPrompt() {
   try {
-    const { prompt, tokenEstimate } = await sendBg("GET_CONTEXT_PROMPT");
-    document.getElementById("contextPreview").textContent = prompt;
-
-    const tokenEl = document.getElementById("tokenCount");
-    tokenEl.textContent = `~${tokenEstimate} tokens`;
-    tokenEl.className = "token-count" +
-      (tokenEstimate > 2000 ? " danger" : tokenEstimate > 1000 ? " warn" : "");
-  } catch (err) {
-    document.getElementById("contextPreview").textContent = "Failed to generate context prompt.";
+    const { prompt } = await sendBg("GET_CONTEXT_PROMPT");
+    setText("contextPreview", prompt);
+    const tokenEstimate = Math.ceil((prompt || "").length / 4);
+    const tokenEl = $("tokenCount");
+    if (tokenEl) tokenEl.textContent = `~${tokenEstimate} tokens`;
+  } catch {
+    setText("contextPreview", "Failed to generate context prompt.");
   }
 }
 
@@ -307,13 +279,16 @@ async function loadContextPrompt() {
 async function loadSettings() {
   try {
     const settings = await sendBg("GET_SETTINGS");
-    document.getElementById("settingProvider").value = settings.apiProvider || "session_claude";
-    document.getElementById("settingApiKey").value = settings.apiKey || "";
-    document.getElementById("settingModel").value = settings.model || "claude-sonnet-4-20250514";
-    document.getElementById("settingCapture").checked = settings.captureEnabled !== false;
-    document.getElementById("settingAutoDistill").checked = settings.autoDistill !== false;
-    document.getElementById("settingThreshold").value = settings.distillThreshold || 20;
-    updateProviderUI(settings.apiProvider || "session_claude");
+    const provider = settings.apiProvider || "session_claude";
+    const s = (id, val) => { const el = $(id); if (el) el.value = val; };
+    const c = (id, val) => { const el = $(id); if (el) el.checked = val; };
+    s("settingProvider", provider);
+    s("settingApiKey", settings.apiKey || "");
+    s("settingModel", settings.model || "claude-sonnet-4-20250514");
+    c("settingCapture", settings.captureEnabled !== false);
+    c("settingAutoDistill", settings.autoDistill !== false);
+    s("settingThreshold", settings.distillThreshold || 20);
+    updateProviderUI(provider);
   } catch (err) {
     console.error("Failed to load settings:", err);
   }
@@ -321,315 +296,256 @@ async function loadSettings() {
 
 function updateProviderUI(provider) {
   const isSession = provider.startsWith("session_");
-  document.getElementById("sessionInfo").style.display = isSession ? "block" : "none";
-  document.getElementById("apiKeyGroup").style.display = isSession ? "none" : "block";
-  document.getElementById("modelGroup").style.display = isSession ? "none" : "block";
+  const show = (id, v) => { const el = $(id); if (el) el.style.display = v ? "block" : "none"; };
+  show("sessionInfo", isSession);
+  show("apiKeyGroup", !isSession);
+  show("modelGroup", !isSession);
 }
 
 // ─── Actions ──────────────────────────────────────────────────
 function bindActions() {
-  // Distill
-  document.getElementById("btnDistill").addEventListener("click", async () => {
-    const btn = document.getElementById("btnDistill");
+  on("btnDistill", "click", async () => {
+    const btn = $("btnDistill");
+    if (!btn) return;
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Distilling...';
     try {
-      // Check if session mode needs permissions
       const settings = await sendBg("GET_SETTINGS");
       if (settings.apiProvider?.startsWith("session_")) {
         const granted = await ensureSessionPermissions(settings.apiProvider);
         if (!granted) {
-          showToast("⚠ Permission required — please approve when prompted");
-          btn.disabled = false;
-          btn.innerHTML = "Distill Now";
-          return;
+          showToast("Permission required — please approve when prompted");
+          btn.disabled = false; btn.innerHTML = "Distill Now"; return;
         }
       }
-
       const result = await sendBg("TRIGGER_DISTILL");
       if (result.success) {
-        showToast("✓ Memory distilled successfully");
-        loadMemoryProfile();
-        loadStats();
-        loadContextPrompt();
+        showToast("Memory distilled successfully");
+        loadMemoryProfile(); loadStats(); loadContextPrompt();
       } else {
-        showToast("⚠ " + (result.error || "Distillation failed"));
+        showToast(result.error || "Distillation failed");
       }
-    } catch (err) {
-      showToast("⚠ Error: " + err.message);
-    }
+    } catch (err) { showToast("Error: " + err.message); }
     btn.disabled = false;
     btn.innerHTML = "Distill Now";
   });
 
-  // Export
-  document.getElementById("btnExport").addEventListener("click", async () => {
+  on("btnExport", "click", async () => {
     try {
       const data = await sendBg("EXPORT_PROFILE");
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `memorybridge-profile-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast("✓ Profile exported");
-    } catch (err) {
-      showToast("⚠ Export failed");
-    }
+      a.href = url; a.download = `memorybridge-profile-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click(); URL.revokeObjectURL(url);
+      showToast("Profile exported");
+    } catch { showToast("Export failed"); }
   });
 
-  // Import
-  document.getElementById("btnImport").addEventListener("click", () => {
-    document.getElementById("fileImport").click();
-  });
+  on("btnImport", "click", () => { const fi = $("fileImport"); if (fi) fi.click(); });
 
-  document.getElementById("fileImport").addEventListener("change", async (e) => {
+  on("fileImport", "change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text);
       const result = await sendBg("IMPORT_PROFILE", data);
-      if (result.success) {
-        showToast("✓ Profile imported");
-        loadMemoryProfile();
-        loadStats();
-        loadContextPrompt();
-      } else {
-        showToast("⚠ " + (result.error || "Import failed"));
-      }
-    } catch (err) {
-      showToast("⚠ Invalid file format");
-    }
+      if (result.success) { showToast("Profile imported"); loadMemoryProfile(); loadStats(); loadContextPrompt(); }
+      else showToast(result.error || "Import failed");
+    } catch { showToast("Invalid file format"); }
     e.target.value = "";
   });
 
-  // Copy context
-  document.getElementById("btnCopyContext").addEventListener("click", async () => {
-    const text = document.getElementById("contextPreview").textContent;
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("✓ Copied to clipboard");
-    } catch {
-      // Fallback
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-      showToast("✓ Copied to clipboard");
-    }
+  on("btnCopyContext", "click", async () => {
+    const el = $("contextPreview");
+    const text = el ? el.textContent : "";
+    try { await navigator.clipboard.writeText(text); showToast("Copied to clipboard"); }
+    catch { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); showToast("Copied to clipboard"); }
   });
 
-  // Inject context
-  document.getElementById("btnInjectContext").addEventListener("click", async () => {
+  // Inject — tries content script first, falls back to chrome.scripting for Comet etc.
+  on("btnInjectContext", "click", async () => {
     try {
       const { prompt } = await sendBg("GET_CONTEXT_PROMPT");
-      await sendTab("INJECT_MEMORY", { memoryText: prompt });
-      showToast("✓ Injected into page");
-    } catch (err) {
-      showToast("⚠ Not on a chatbot page");
-    }
+      const prefix = `[Context from my MemoryBridge profile — this describes who I am and my preferences]\n\n${prompt}\n\n---\n\nNow, here's what I need help with:\n\n`;
+
+      // Try content script first
+      try { await sendTab("INJECT_MEMORY", { memoryText: prompt }); showToast("Injected into page"); return; } catch (_) {}
+
+      // Fallback: programmatic injection (works on any page, needed for Comet)
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id) {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (text) => {
+              const sels = ['#ask-input[contenteditable="true"]', '#ask-input', '[data-lexical-editor="true"]', 'div.ProseMirror[contenteditable="true"]', '#prompt-textarea[contenteditable="true"]', '#prompt-textarea', '[contenteditable="true"][data-placeholder]', 'textarea'];
+              let ed = null;
+              for (const s of sels) { ed = document.querySelector(s); if (ed) break; }
+              if (!ed) { navigator.clipboard.writeText(text); return "clipboard"; }
+              ed.focus();
+              if (ed.tagName === "TEXTAREA" || ed.tagName === "INPUT") {
+                ed.value = text;
+                ed.dispatchEvent(new Event("input", { bubbles: true }));
+              } else {
+                const lines = text.split("\n");
+                let html = "";
+                for (const l of lines) { html += l.trim() === "" ? "<p><br></p>" : `<p>${l.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}</p>`; }
+                ed.innerHTML = html;
+                ed.dispatchEvent(new Event("focus", { bubbles: true }));
+                ed.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+              }
+              return "ok";
+            },
+            args: [prefix]
+          });
+          showToast("Injected into page");
+          return;
+        }
+      } catch (_) {}
+
+      showToast("Not on a chatbot page");
+    } catch { showToast("Not on a chatbot page"); }
   });
 
-  // Save settings
-  document.getElementById("btnSaveSettings").addEventListener("click", async () => {
-    const settings = {
-      apiProvider: document.getElementById("settingProvider").value,
-      apiKey: document.getElementById("settingApiKey").value,
-      model: document.getElementById("settingModel").value,
-      captureEnabled: document.getElementById("settingCapture").checked,
-      autoDistill: document.getElementById("settingAutoDistill").checked,
-      distillThreshold: parseInt(document.getElementById("settingThreshold").value) || 20
-    };
+  on("btnSaveSettings", "click", async () => {
+    const v = (id) => $(id)?.value;
+    const ch = (id) => $(id)?.checked;
     try {
-      await sendBg("SAVE_SETTINGS", settings);
-      showToast("✓ Settings saved");
-    } catch (err) {
-      showToast("⚠ Failed to save");
-    }
+      await sendBg("SAVE_SETTINGS", {
+        apiProvider: v("settingProvider"), apiKey: v("settingApiKey"), model: v("settingModel"),
+        captureEnabled: ch("settingCapture"), autoDistill: ch("settingAutoDistill"),
+        distillThreshold: parseInt(v("settingThreshold")) || 20
+      });
+      showToast("Settings saved");
+    } catch { showToast("Failed to save"); }
   });
 
-  // Provider dropdown — toggle API key fields and request permissions
-  document.getElementById("settingProvider").addEventListener("change", async (e) => {
+  on("settingProvider", "change", async (e) => {
     updateProviderUI(e.target.value);
     if (e.target.value.startsWith("session_")) {
       const granted = await ensureSessionPermissions(e.target.value);
-      if (!granted) {
-        showToast("⚠ Permission needed for session mode");
-      }
+      if (!granted) showToast("Permission needed for session mode");
     }
   });
 
-  // Clear buffer
-  document.getElementById("btnClearBuffer").addEventListener("click", async () => {
-    if (confirm("Clear all buffered messages? This data hasn't been distilled yet.")) {
-      await sendBg("CLEAR_RAW_BUFFER");
-      loadBuffer();
-      showToast("✓ Buffer cleared");
-    }
+  on("btnClearBuffer", "click", async () => {
+    if (confirm("Clear all buffered messages?")) { await sendBg("CLEAR_RAW_BUFFER"); loadBuffer(); showToast("Buffer cleared"); }
   });
 
-  // Clear all
-  document.getElementById("btnClearAll").addEventListener("click", async () => {
-    if (confirm("This will permanently delete your entire memory profile and all captured data. Are you sure?")) {
-      await sendBg("CLEAR_ALL_DATA");
-      loadMemoryProfile();
-      loadStats();
-      loadBuffer();
-      loadContextPrompt();
-      showToast("✓ All data cleared");
-    }
-  });
-
-  // Dismiss update banner
-  document.getElementById("btnDismissUpdate").addEventListener("click", async (e) => {
-    e.stopPropagation();
-    await sendBg("DISMISS_UPDATE");
-    document.getElementById("updateBanner").classList.remove("visible");
-  });
-
-  // Manual update check
-  document.getElementById("btnCheckUpdate").addEventListener("click", async () => {
-    const statusEl = document.getElementById("updateStatus");
-    statusEl.textContent = "Checking...";
+  // Manual capture from page (for Comet and sidebar chatbots)
+  on("btnScrape", "click", async () => {
+    const btn = $("btnScrape");
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = "Capturing...";
     try {
-      const result = await sendBg("CHECK_FOR_UPDATE");
-      if (!result || result.error) {
-        statusEl.textContent = "⚠ " + (result?.error || "Check failed — is update.json uploaded to GitHub?");
-      } else if (result.updateAvailable) {
-        statusEl.textContent = `✓ Update available: v${result.latestVersion}`;
-        statusEl.style.color = "var(--warning)";
-        loadUpdateInfo();
+      const result = await sendBg("SCRAPE_ACTIVE_TAB");
+      if (result.error) {
+        showToast(result.error);
+      } else if (result.captured === 0) {
+        showToast(result.message || "No new messages found");
       } else {
-        statusEl.textContent = `✓ You're on the latest version (v${result.currentVersion})`;
-        statusEl.style.color = "var(--success)";
+        showToast(`Captured ${result.captured} messages from ${result.provider}`);
+        loadBuffer();
+        loadStats();
       }
     } catch (err) {
-      statusEl.textContent = "⚠ Error: " + err.message;
+      showToast("Capture failed: " + err.message);
     }
+    btn.disabled = false;
+    btn.textContent = "Capture from page";
+  });
+
+  on("btnClearAll", "click", async () => {
+    if (confirm("Delete entire memory profile and all data?")) {
+      await sendBg("CLEAR_ALL_DATA"); loadMemoryProfile(); loadStats(); loadBuffer(); loadContextPrompt(); showToast("All data cleared");
+    }
+  });
+
+  on("btnDismissUpdate", "click", async (e) => {
+    e.stopPropagation(); await sendBg("DISMISS_UPDATE");
+    const b = $("updateBanner"); if (b) b.classList.remove("visible");
+  });
+
+  on("btnCheckUpdate", "click", async () => {
+    setText("updateStatus", "Checking...");
+    try {
+      const result = await sendBg("CHECK_FOR_UPDATE");
+      const el = $("updateStatus"); if (!el) return;
+      if (!result || result.error) { el.textContent = result?.error || "Check failed"; }
+      else if (result.updateAvailable) { el.textContent = `Update available: v${result.latestVersion}`; el.style.color = "var(--warning)"; loadUpdateInfo(); }
+      else { el.textContent = `You're on the latest (v${result.currentVersion})`; el.style.color = "var(--success)"; }
+    } catch (err) { setText("updateStatus", "Error: " + err.message); }
     loadReleaseHistory();
   });
 
-  // Load release history on settings tab open
   document.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      if (tab.dataset.tab === "settings") loadReleaseHistory();
-    });
+    tab.addEventListener("click", () => { if (tab.dataset.tab === "settings") loadReleaseHistory(); });
   });
 }
 
 // ─── Toast ────────────────────────────────────────────────────
 function showToast(message) {
-  const toast = document.getElementById("toast");
+  const toast = $("toast");
+  if (!toast) return;
   toast.textContent = message;
   toast.classList.add("show");
   clearTimeout(showToast._timer);
   showToast._timer = setTimeout(() => toast.classList.remove("show"), 2500);
 }
 
-// ─── Update Checker ───────────────────────────────────────────
+// ─── Update Info ──────────────────────────────────────────────
 async function loadUpdateInfo() {
   try {
     const info = await sendBg("GET_UPDATE_INFO");
-
-    // Always show current version
-    const vLabel = document.getElementById("versionLabel");
-    if (vLabel && info.currentVersion) {
-      vLabel.textContent = `v${info.currentVersion}`;
-    }
-
-    // Show banner if update available and not dismissed
-    const banner = document.getElementById("updateBanner");
-    if (info.updateAvailable && !info.dismissed) {
-      document.getElementById("updateVersion").textContent = `v${info.latestVersion}`;
-      document.getElementById("updateChangelog").textContent = info.changelog || "";
-      if (info.downloadUrl) {
-        document.getElementById("updateDownloadLink").href = info.downloadUrl;
-      }
+    const vLabel = $("versionLabel");
+    if (vLabel && info.currentVersion) vLabel.textContent = `v${info.currentVersion}`;
+    const banner = $("updateBanner");
+    if (info.updateAvailable && !info.dismissed && banner) {
+      setText("updateVersion", `v${info.latestVersion}`);
+      setText("updateChangelog", info.changelog || "");
+      const dl = $("updateDownloadLink"); if (dl && info.downloadUrl) dl.href = info.downloadUrl;
       banner.classList.add("visible");
     }
   } catch (_) {}
 }
 
 async function loadReleaseHistory() {
-  const container = document.getElementById("releaseHistory");
+  const container = $("releaseHistory");
   if (!container) return;
   container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted);">Loading releases...</div>';
-
   try {
     const result = await sendBg("GET_RELEASE_HISTORY");
-    if (result.error) {
-      container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted);">\u26a0 ${escapeHtml(result.error)}</div>`;
-      return;
-    }
-
-    if (!result.releases?.length) {
-      container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted);">No releases found.</div>';
-      return;
-    }
-
+    if (result.error) { container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted);">${escapeHtml(result.error)}</div>`; return; }
+    if (!result.releases?.length) { container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted);">No releases found.</div>'; return; }
     let html = "";
     for (const r of result.releases) {
       const date = r.date ? new Date(r.date).toLocaleDateString() : "";
-      const isCurrent = r.isCurrent;
-
-      html += `<div style="
-        padding: 8px 10px;
-        margin-bottom: 4px;
-        background: ${isCurrent ? 'var(--accent-glow)' : 'var(--bg-card)'};
-        border: 1px solid ${isCurrent ? 'var(--border-accent)' : 'var(--border)'};
-        border-radius: var(--radius-sm);
-      ">`;
-      html += `<div style="display: flex; align-items: center; justify-content: space-between;">`;
-      html += `<div>`;
-      html += `<span style="font-weight: 600; font-size: 12px; color: var(--text-primary);">${escapeHtml(r.name)}</span>`;
-      if (isCurrent) html += ` <span style="font-size: 10px; color: var(--accent); font-weight: 600;">\u2190 installed</span>`;
-      html += `<div style="font-size: 10px; color: var(--text-muted);">${date}</div>`;
+      const cur = r.isCurrent;
+      html += `<div style="padding:8px 10px;margin-bottom:4px;background:${cur?'var(--accent-glow)':'var(--bg-card)'};border:1px solid ${cur?'var(--border-accent)':'var(--border)'};border-radius:var(--radius-sm);">`;
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;"><div>`;
+      html += `<span style="font-weight:600;font-size:12px;color:var(--text-primary);">${escapeHtml(r.name)}</span>`;
+      if (cur) html += ` <span style="font-size:10px;color:var(--accent);font-weight:600;">\u2190 installed</span>`;
+      html += `<div style="font-size:10px;color:var(--text-muted);">${date}</div></div>`;
+      if (r.downloadUrl) html += `<a href="${escapeHtml(r.downloadUrl)}" target="_blank" style="text-decoration:none;"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px;">\u2b07 Download</button></a>`;
       html += `</div>`;
-      if (r.downloadUrl) {
-        html += `<a href="${escapeHtml(r.downloadUrl)}" target="_blank" style="text-decoration: none;">
-          <button class="btn btn-sm" style="font-size: 10px; padding: 3px 8px;">\u2b07 Download</button>
-        </a>`;
-      }
-      html += `</div>`;
-      if (r.changelog) {
-        html += `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;">${escapeHtml(r.changelog)}</div>`;
-      }
+      if (r.changelog) html += `<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;line-height:1.4;">${escapeHtml(r.changelog)}</div>`;
       html += `</div>`;
     }
-
     container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted);">\u26a0 ${escapeHtml(err.message)}</div>`;
-  }
+  } catch (err) { container.innerHTML = `<div style="font-size:11px;color:var(--text-muted);">${escapeHtml(err.message)}</div>`; }
 }
 
 // ─── Utility ──────────────────────────────────────────────────
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
+function escapeHtml(str) { const d = document.createElement("div"); d.textContent = str; return d.innerHTML; }
 
 async function ensureSessionPermissions(provider) {
-  const origins = {
-    session_claude: ["https://claude.ai/*"],
-    session_chatgpt: ["https://chatgpt.com/*", "https://chat.openai.com/*"]
-  };
+  const origins = { session_claude: ["https://claude.ai/*"], session_chatgpt: ["https://chatgpt.com/*", "https://chat.openai.com/*"] };
   const needed = origins[provider] || [];
   if (!needed.length) return true;
-
-  const already = await chrome.permissions.contains({
-    permissions: ["cookies"],
-    origins: needed
-  });
+  const already = await chrome.permissions.contains({ permissions: ["cookies"], origins: needed });
   if (already) return true;
-
-  return await chrome.permissions.request({
-    permissions: ["cookies"],
-    origins: needed
-  });
+  return await chrome.permissions.request({ permissions: ["cookies"], origins: needed });
 }

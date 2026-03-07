@@ -20,7 +20,7 @@
  *     inputField       — the chat input element for injection
  */
 
-const PROVIDERS = {
+var PROVIDERS = {
 
   chatgpt: {
     hostPatterns: ["chat.openai.com", "chatgpt.com"],
@@ -126,13 +126,14 @@ const PROVIDERS = {
     injection: "reactHTML",
     selectors: {
       container: [
+        'main',
         '[class*="conversation"]',
-        '[class*="chat"]',
-        'main'
+        '[class*="chat"]'
       ],
       userMessage: [
-        'div.bg-subtle.rounded-2xl',
-        'div[class*="bg-subtle"][class*="rounded"]'
+        'span.min-w-0.font-sans.text-base.font-normal.select-text.break-words',
+        'span.min-w-0.select-text.break-words',
+        'div.bg-subtle.rounded-2xl'
       ],
       assistantMessage: [
         'p[class*="my-2"]'
@@ -172,8 +173,9 @@ const PROVIDERS = {
         'main'
       ],
       userMessage: [
-        'div.bg-subtle.rounded-2xl',
-        'div[class*="bg-subtle"][class*="rounded"]'
+        'span.min-w-0.font-sans.text-base.font-normal.select-text.break-words',
+        'span.min-w-0.select-text.break-words',
+        'div.bg-subtle.rounded-2xl'
       ],
       assistantMessage: [
         'p[class*="my-2"]'
